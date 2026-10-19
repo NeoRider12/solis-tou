@@ -1,0 +1,116 @@
+name: Solis Time of Use
+
+on:
+  # Zeitplan in UTC (GitHub kennt keine Ortszeit), stündlich zur Minute 5.
+  # Welche Aktion zur jeweiligen Ortszeit dran ist, entscheidet das Skript.
+  schedule:
+    # Winter (Okt–März): 16–9 Uhr UTC → deckt 18:00–07:00 Ortszeit + Aus-Sicherungen ab
+    - cron: "5 16-23,0-9 * 10-12,1-3 *"
+    # Sommer (Apr–Sep, immer Sommerzeit): 18–8 Uhr UTC → 20:00–10:00 Ortszeit
+    - cron: "5 18-23,0-8 * 4-9 *"
+
+  # Manuell starten: Reiter "Actions" → "Solis Time of Use" → "Run workflow"
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Befehl"
+        type: choice
+        options: ["status", "auto", "on", "off", "sommer", "winter", "protokoll"]   # in Anführungszeichen! Sonst macht YAML aus on/off true/false
+        default: "status"
+      dry_run:
+        description: "Nur anzeigen, nichts schreiben (Dry-Run)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write       # nur für den Keepalive-Commit (siehe letzter Schritt), keine Daten
+
+# Nie zwei Läufe gleichzeitig; ein neuer wartet, bis der alte fertig ist.
+concurrency:
+  group: solis-tou
+  cancel-in-progress: false
+
+env:
+  # Privates Repository für das Protokoll: <dein Benutzername>/solis-protokoll
+  # (anderer Name? → unter Settings → Variables → Actions die Variable PROTOKOLL_REPO anlegen)
+  PROTOKOLL_REPO: ${{ vars.PROTOKOLL_REPO || format('{0}/solis-protokoll', github.repository_owner) }}
+  HAT_PROTOKOLL: ${{ secrets.PROTOKOLL_TOKEN != '' }}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3          # Notbremse: hängt etwas, bricht GitHub nach 3 Min. ab
+    steps:
+      - uses: actions/checkout@v5
+
+      # Privates Protokoll-Repo in den Unterordner "protokoll-repo" holen.
+      # Ohne Secret PROTOKOLL_TOKEN wird das übersprungen → Steuerung läuft ohne Protokoll.
+      - name: Protokoll-Repo holen
+        id: prot
+        if: env.HAT_PROTOKOLL == 'true'
+        continue-on-error: true   # Protokoll darf die Steuerung nie blockieren
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.PROTOKOLL_REPO }}
+          token: ${{ secrets.PROTOKOLL_TOKEN }}
+          path: protokoll-repo
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Abhängigkeiten installieren
+        run: pip install -r requirements.txt
+
+      - name: Skript ausführen
+        env:
+          SOLIS_KEY_ID: ${{ secrets.SOLIS_KEY_ID }}
+          SOLIS_KEY_SECRET: ${{ secrets.SOLIS_KEY_SECRET }}
+          SOLIS_INVERTER_SN: ${{ secrets.SOLIS_INVERTER_SN }}
+          TZ: Europe/Berlin       # Skript rechnet in deutscher Ortszeit (inkl. Sommerzeit)
+          PROTOKOLL_DIR: ${{ steps.prot.outcome == 'success' && 'protokoll-repo' || '' }}
+          # Zeitplan-Lauf: immer "auto" und scharf; manueller Lauf: Auswahl aus dem Formular
+          CMD: ${{ github.event_name == 'schedule' && 'auto' || inputs.command }}
+          DRY: ${{ github.event_name != 'schedule' && inputs.dry_run && '--dry-run' || '' }}
+        run: python solis_tou.py "$CMD" $DRY
+
+      - name: Protokoll speichern (privates Repo)
+        if: always() && steps.prot.outcome == 'success'
+        working-directory: protokoll-repo
+        run: |
+          if [ -n "$(git status --porcelain -- protokoll PROTOKOLL.md)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            for f in protokoll PROTOKOLL.md; do if [ -e "$f" ]; then git add "$f"; fi; done
+            git commit -m "Protokoll $(TZ=Europe/Berlin date +'%d.%m.%Y %H:%M')"
+            for i in 1 2 3; do
+              git pull --rebase --quiet && git push --quiet && exit 0
+              sleep 5
+            done
+            echo "::warning::Protokoll konnte nicht gespeichert werden."
+          else
+            echo "Keine Änderung am Protokoll."
+          fi
+
+      - name: Hinweis bei fehlendem Protokoll-Zugriff
+        if: env.HAT_PROTOKOLL == 'true' && steps.prot.outcome != 'success'
+        run: echo "::warning::Protokoll-Repo ${{ env.PROTOKOLL_REPO }} nicht erreichbar – Token abgelaufen oder Repo-Name falsch? Die Steuerung lief trotzdem."
+
+      # GitHub deaktiviert Zeitpläne in öffentlichen Repos nach 60 Tagen ohne Commit.
+      # Da das Protokoll im privaten Repo landet, gibt es hier sonst keine Commits.
+      # Lösung: Ist der letzte Commit älter als 45 Tage, wird ein LEERER Commit erzeugt
+      # (enthält keinerlei Daten, nur die Meldung "keepalive").
+      - name: Keepalive (60-Tage-Regel)
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        run: |
+          letzter=$(git log -1 --format=%ct)
+          alter_tage=$(( ( $(date +%s) - letzter ) / 86400 ))
+          if [ "$alter_tage" -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "keepalive"
+            git push --quiet && echo "Keepalive-Commit erstellt (letzter Commit war $alter_tage Tage alt)."
+          else
+            echo "Kein Keepalive nötig (letzter Commit vor $alter_tage Tagen)."
+          fi

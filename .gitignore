@@ -1,0 +1,11 @@
+# Protokoll gehört ins private Repo "solis-protokoll", nie hierher
+protokoll/
+protokoll-repo/
+PROTOKOLL.md
+
+# Zugangsdaten nie committen
+.env
+*.secret
+
+__pycache__/
+*.pyc
