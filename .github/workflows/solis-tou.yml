@@ -3,6 +3,7 @@ name: Solis Time of Use
 on:
   # Zeitplan in UTC (GitHub kennt keine Ortszeit), stündlich zur Minute 5.
   # Welche Aktion zur jeweiligen Ortszeit dran ist, entscheidet das Skript.
+  # Zeiten gelten für Deutschland (TZ Europe/Berlin weiter unten).
   schedule:
     # Winter (Okt–März): 16–9 Uhr UTC → deckt 18:00–07:00 Ortszeit + Aus-Sicherungen ab
     - cron: "5 16-23,0-9 * 10-12,1-3 *"

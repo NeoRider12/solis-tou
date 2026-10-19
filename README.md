@@ -4,6 +4,8 @@ Steuert den „Time of Use“-Schalter (TOU) eines Solis RAI-3K-48ES-5G über di
 
 > Privates Hobbyprojekt, ohne Gewähr. Es schreibt Einstellungen in deinen Wechselrichter. Nutzung auf eigenes Risiko (siehe `LICENSE`).
 
+> **Getestet mit:** Solis RAI-3K-48ES-5G und 4× Pylontech US5000. Andere Modelle oder Firmware-Stände können die Register anders belegen – vor dem ersten scharfen Lauf unbedingt Schritt 6 der Einrichtung durchgehen.
+
 ## Prinzip
 
 Im Wechselrichter ist ein **Ladeslot mit 0,1 A** eingestellt. Ist TOU an, lädt der Wechselrichter in dieser Zeit minimal, und die Pylontech-BMS gehen schlafen. Das Skript schaltet TOU nachts nur ein, wenn der SOC unter die Schwelle der Saison fällt. Morgens schaltet es TOU wieder aus.
@@ -39,6 +41,7 @@ Zugangsdaten stehen nie im Code, sondern nur in den **Secrets** dieses Repos. Se
 
 ## Einrichtung
 
+0. **SolisCloud-API beantragen:** In SolisCloud den API-Zugang anfordern (KeyID + KeySecret) und dabei ausdrücklich die **Steuerungsfreigabe (Device Control)** mit beantragen. Ohne sie kann das Skript nur lesen, jeder Schreibbefehl wird abgelehnt.
 1. **Privates Repo** `solis-protokoll` anlegen (darf leer sein oder die bisherigen Protokolldateien enthalten).
 2. **Fine-grained Token** erstellen: nur Zugriff auf `solis-protokoll`, Berechtigung *Contents: Read and write*.
 3. **Dieses Repo** öffentlich anlegen und den Ordnerinhalt hochladen (inkl. `.github/workflows/`).
@@ -58,6 +61,13 @@ Zugangsdaten stehen nie im Code, sondern nur in den **Secrets** dieses Repos. Se
    - `on` / `off` schalten TOU sofort.
    - `sommer` / `winter` setzen Ladeslot 1 sofort auf das jeweilige Saisonprofil.
    - `protokoll` erzeugt `PROTOKOLL.md` im privaten Repo neu und zeigt die Tabelle im Log an.
+6. **Erster Test und Ladeslot setzen:**
+   - `status` starten und prüfen: Der Speichermodus (CID 636) sollte **1** (TOU aus) bzw. **3** (TOU an) zeigen. Steht dort etwas anderes, ist dein Gerät anders belegt – dann **nicht** scharf schalten, sondern erst die Bits prüfen.
+   - `auto` mit Dry-Run starten und die Entscheidung im Log ansehen.
+   - Einmal `winter` bzw. `sommer` (je nach aktueller Saison) **ohne** Dry-Run starten. Damit steht Ladeslot 1 sicher auf **0,1 A** und der richtigen Zeit. Wichtig, falls dort vorher ein höherer Ladestrom eingestellt war: Sonst lädt der Wechselrichter nachts mit diesem Strom aus dem Netz, sobald TOU angeht.
+   - Danach in der Solis-App kontrollieren, dass Slot 1 wirklich 0,1 A zeigt (die API liest 0,1 A als `0`).
+
+**Zeitzone:** Workflow und Skript rechnen mit deutscher Ortszeit (`TZ: Europe/Berlin` im Workflow), der `cron` ist darauf abgestimmt. Wer woanders wohnt, muss `TZ` und die `cron`-Zeilen anpassen (GitHub rechnet `cron` immer in UTC).
 
 ## Was öffentlich sichtbar ist
 
@@ -112,7 +122,7 @@ Sollte der Zeitplan trotzdem einmal deaktiviert werden, schickt GitHub vorher ei
 - Beim TOU-Schalten ändert das Skript nur Bit 1 im Speichermodus-Register (CID 636 ≙ Modbus 43110). Alle anderen Bits bleiben unverändert.
 - Beim Ladeslot ändert es nur Ladestrom und Ladezeit von Slot 1 (CID 103).
 - **Pro Lauf gibt es höchstens einen Schreibbefehl je Register.** Danach wird zurückgelesen. Ist der neue Wert nicht bestätigt, gibt es eine gelbe Warnung, und der nächste Lauf prüft erneut.
-- Der Ladestrom 0,1 A wird von der API als `0` gelesen, intern arbeitet der Wechselrichter aber mit 0,1 A. Verglichen wird deshalb nur die Ladezeit.
+- Der Ladestrom 0,1 A wird von der API als `0` gelesen, intern arbeitet der Wechselrichter aber mit 0,1 A. Beim morgendlichen Abgleich gilt deshalb ein gelesener Strom bis 0,1 A als passend; ein deutlich höherer Wert (z. B. 50 A) wird erkannt und auf 0,1 A korrigiert.
 - **Fehler mit E-Mail** gibt es in diesen Fällen:
   - Die API lehnt einen Befehl ab.
   - Der SOC ist nachts nicht lesbar.

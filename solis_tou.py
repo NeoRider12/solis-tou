@@ -10,7 +10,8 @@ Prinzip
     Saison, wird TOU EINgeschaltet. In der Prüfphase wird TOU NIE ausgeschaltet.
   * ab 07:00: TOU wird AUSgeschaltet (mehrere Läufe bis Vormittag als Sicherung).
   * Saisonwechsel: Morgens wird der Ladeslot 1 (Zeit + 0,1 A) automatisch auf
-    das Profil der kommenden Nacht gesetzt, falls er abweicht.
+    das Profil der kommenden Nacht gesetzt, falls die Zeit abweicht oder der
+    Ladestrom deutlich zu hoch ist.
 
 Saisons (siehe SAISONS)
   Winter 01.10.–15.03.: Prüfung 18–06 Uhr, SOC <= 30 %, Ladeslot 18:00–07:00
@@ -545,9 +546,21 @@ def setze_ladeslot(name: str, dry_run: bool, alt: str | None = None) -> bool:
     return False
 
 
+def strom_passt(gelesen: str, ziel: str) -> bool:
+    """Vergleicht den gelesenen Ladestrom mit dem Ziel. 0,1 A liest die API als 0,
+    deshalb gilt bei Zielen unter 1 A alles bis 0,1 A als passend. Ein deutlich
+    höherer Wert (z. B. 50 A aus einer früheren Einstellung) wird erkannt.
+    Unlesbare Werte gelten als passend, damit nicht endlos neu geschrieben wird."""
+    try:
+        g, z = float(gelesen), float(ziel)
+    except ValueError:
+        return True
+    return g <= 0.1 if z < 1 else abs(g - z) < 0.05
+
+
 def ladeslot_abgleich(now: datetime, dry_run: bool) -> None:
-    """Morgens: Ladeslot 1 auf das Profil der kommenden Nacht setzen, falls die Zeit abweicht.
-    (Der Ladestrom 0,1 A wird von der API als 0 gelesen und kann nicht verglichen werden.)"""
+    """Morgens: Ladeslot 1 auf das Profil der kommenden Nacht setzen, falls die Zeit
+    abweicht oder der Ladestrom deutlich zu hoch ist (0,1 A liest die API als 0)."""
     name = saison(now.date())
     if restzeit() < 35:
         print("Ladeslot-Abgleich übersprungen (Zeitbudget) – nächster Lauf.")
@@ -555,9 +568,13 @@ def ladeslot_abgleich(now: datetime, dry_run: bool) -> None:
     alt = read_cid(CID_CHARGE_DISCHARGE)
     teile = alt.split(",")
     if len(teile) == 12 and teile[2] == SAISONS[name]["ladezeit"]:
-        print(f"Ladeslot 1 passt zur Saison '{name}' ({teile[2]}).")
-        return
-    print(f"Saisonwechsel: Ladeslot 1 weicht vom Profil '{name}' ab.")
+        if strom_passt(teile[0], SAISONS[name]["strom"]):
+            print(f"Ladeslot 1 passt zur Saison '{name}' ({teile[2]}).")
+            return
+        print(f"Ladeslot 1: Zeit passt, aber Ladestrom '{teile[0]}' A statt "
+              f"{SAISONS[name]['strom']} A – wird korrigiert.")
+    else:
+        print(f"Saisonwechsel: Ladeslot 1 weicht vom Profil '{name}' ab.")
     setze_ladeslot(name, dry_run, alt)
 
 
