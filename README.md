@@ -36,9 +36,8 @@ Zugangsdaten stehen nie im Code, sondern nur in den **Secrets** dieses Repos. Se
 | `requirements.txt` | Python-Abhängigkeit (`requests`) |
 | `.github/workflows/solis-tou.yml` | Zeitplan, manueller Start, Protokoll-Speicherung, Keepalive |
 | `ZEITPLAN.md` | Tabelle aller Läufe und Schaltzeiten |
-| `UMZUG.md` | Schritt-für-Schritt-Anleitung für die Einrichtung / den Umzug |
 
-## Einrichtung (Kurzfassung – ausführlich in `UMZUG.md`)
+## Einrichtung
 
 1. **Privates Repo** `solis-protokoll` anlegen (darf leer sein oder die bisherigen Protokolldateien enthalten).
 2. **Fine-grained Token** erstellen: nur Zugriff auf `solis-protokoll`, Berechtigung *Contents: Read and write*.

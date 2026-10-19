@@ -3,6 +3,9 @@ protokoll/
 protokoll-repo/
 PROTOKOLL.md
 
+# Persönliche Notizen / Umzugsanleitung bleiben lokal
+UMZUG.md
+
 # Zugangsdaten nie committen
 .env
 *.secret
