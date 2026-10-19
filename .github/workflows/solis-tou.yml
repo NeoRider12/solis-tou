@@ -72,7 +72,41 @@ jobs:
           # Zeitplan-Lauf: immer "auto" und scharf; manueller Lauf: Auswahl aus dem Formular
           CMD: ${{ github.event_name == 'schedule' && 'auto' || inputs.command }}
           DRY: ${{ github.event_name != 'schedule' && inputs.dry_run && '--dry-run' || '' }}
-        run: python solis_tou.py "$CMD" $DRY
+          STILL: ${{ github.event_name == 'schedule' }}
+        run: |
+          # Manueller Lauf: volle Ausgabe (danach ggf. Run löschen).
+          if [ "$STILL" != "true" ]; then
+            python solis_tou.py "$CMD" $DRY
+            exit $?
+          fi
+
+          # Zeitplan-Lauf = stiller Modus: Das öffentliche Log zeigt keine Werte (SOC, Modus …),
+          # nur OK / Warnung / Fehler. Details stehen im privaten Protokoll.
+          LOG="$RUNNER_TEMP/lauf.log"
+          set +e
+          python solis_tou.py "$CMD" > "$LOG" 2>&1
+          rc=$?
+          set -e
+          warnungen=$(grep -c '^::warning::' "$LOG" || true)
+
+          # Bei Warnung/Fehler das vollständige Log ins PRIVATE Repo legen (nur dann → kaum Commits)
+          if { [ "$rc" -ne 0 ] || [ "$warnungen" -gt 0 ]; } && [ -n "$PROTOKOLL_DIR" ]; then
+            mkdir -p "$PROTOKOLL_DIR/protokoll"
+            { echo "=== $(date +'%d.%m.%Y %H:%M') · Exit $rc ==="; sed 's/^::warning:://' "$LOG"; } \
+              > "$PROTOKOLL_DIR/protokoll/letzter-problemlauf.txt"
+            ort="Details: protokoll/letzter-problemlauf.txt im privaten Repo."
+          else
+            ort="Details im privaten Protokoll."
+          fi
+
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::Lauf fehlgeschlagen. $ort"
+            exit "$rc"
+          elif [ "$warnungen" -gt 0 ]; then
+            echo "::warning::Lauf mit Warnung. $ort"
+          else
+            echo "Lauf OK."
+          fi
 
       - name: Protokoll speichern (privates Repo)
         if: always() && steps.prot.outcome == 'success'

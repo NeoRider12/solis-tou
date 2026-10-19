@@ -59,7 +59,13 @@ Zugangsdaten stehen nie im Code, sondern nur in den **Secrets** dieses Repos. Se
    - `sommer` / `winter` setzen Ladeslot 1 sofort auf das jeweilige Saisonprofil.
    - `protokoll` erzeugt `PROTOKOLL.md` im privaten Repo neu und zeigt die Tabelle im Log an.
 
-**Empfehlung:** *Settings → Actions → General → Artifact and log retention* auf **1 Tag** stellen. Die Logs öffentlicher Repos kann jeder lesen; sie enthalten zwar keine Zugangsdaten, aber SOC-Werte und Schaltzeiten.
+## Was öffentlich sichtbar ist
+
+- **Liste der Läufe** (Uhrzeit, Dauer, grün/rot): für jeden sichtbar, nicht abschaltbar.
+- **Zeitplan-Läufe laufen im stillen Modus:** Das Log zeigt nur `Lauf OK`, eine Warnung oder einen Fehler – keine SOC-Werte, keinen Speichermodus, keine Ladeslots. Bei Warnung oder Fehler legt der Workflow das vollständige Log ins private Repo: `protokoll/letzter-problemlauf.txt`.
+- **Manuelle Läufe** (`status`, `on`, …) zeigen die volle Ausgabe. Danach bei Bedarf löschen: Lauf öffnen → „…“ → *Delete workflow run*.
+- **Zugangsdaten** erscheinen nie, sie werden immer als `***` ausgeblendet.
+- **Empfehlung:** *Settings → Actions → General → Artifact and log retention* auf **1 Tag** stellen.
 
 ## Einstellungen (oben in `solis_tou.py`)
 
