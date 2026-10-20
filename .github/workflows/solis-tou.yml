@@ -6,7 +6,7 @@ on:
   # Zeiten gelten für Deutschland (TZ Europe/Berlin weiter unten).
   schedule:
     # Winter (Okt–März): 16–9 Uhr UTC → deckt 18:00–07:00 Ortszeit + Aus-Sicherungen ab
-    - cron: "5 16-23,0-9 * 10-12,1-3 *"
+    - cron: "5 10-23,0-9 * 10-12,1-3 *"
     # Sommer (Apr–Sep, immer Sommerzeit): 18–8 Uhr UTC → 20:00–10:00 Ortszeit
     - cron: "5 18-23,0-8 * 4-9 *"
 
