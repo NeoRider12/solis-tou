@@ -1,22 +1,21 @@
 name: Solis Time of Use
+# Anzeigename je Lauf → in der Liste sieht man sofort, wer gestartet hat
+run-name: "${{ inputs.command == 'extern' && 'Extern (cron-job.org)' || format('Manuell: {0}', inputs.command) }}"
 
 on:
-  # Zeitplan in UTC (GitHub kennt keine Ortszeit), stündlich zur Minute 5.
-  # Welche Aktion zur jeweiligen Ortszeit dran ist, entscheidet das Skript.
-  # Zeiten gelten für Deutschland (TZ Europe/Berlin weiter unten).
-  schedule:
-    # Winter (Okt–März): 16–9 Uhr UTC → deckt 18:00–07:00 Ortszeit + Aus-Sicherungen ab
-    - cron: "5 10-23,0-9 * 10-12,1-3 *"
-    # Sommer (Apr–Sep, immer Sommerzeit): 18–8 Uhr UTC → 20:00–10:00 Ortszeit
-    - cron: "5 18-23,0-8 * 4-9 *"
+  # Kein GitHub-Zeitplan mehr (der startete oft 30–60 min zu spät oder gar nicht).
+  # Gestartet wird von außen: cron-job.org ruft stündlich die GitHub-API auf (Befehl "extern"),
+  # pünktlich und direkt in deutscher Ortszeit. Einrichtung: siehe README.
 
   # Manuell starten: Reiter "Actions" → "Solis Time of Use" → "Run workflow"
+  # Befehl "extern" = Start von außen (cron-job.org über die GitHub-API):
+  # immer "auto", scharf (Dry-Run wird ignoriert) und still.
   workflow_dispatch:
     inputs:
       command:
         description: "Befehl"
         type: choice
-        options: ["status", "auto", "on", "off", "sommer", "winter", "protokoll"]   # in Anführungszeichen! Sonst macht YAML aus on/off true/false
+        options: ["status", "auto", "on", "off", "sommer", "winter", "protokoll", "extern"]   # in Anführungszeichen! Sonst macht YAML aus on/off true/false
         default: "status"
       dry_run:
         description: "Nur anzeigen, nichts schreiben (Dry-Run)"
@@ -24,7 +23,7 @@ on:
         default: true
 
 permissions:
-  contents: write       # nur für den Keepalive-Commit (siehe letzter Schritt), keine Daten
+  contents: read        # nur lesen; ins Protokoll-Repo schreibt der PROTOKOLL_TOKEN
 
 # Nie zwei Läufe gleichzeitig; ein neuer wartet, bis der alte fertig ist.
 concurrency:
@@ -70,10 +69,10 @@ jobs:
           SOLIS_INVERTER_SN: ${{ secrets.SOLIS_INVERTER_SN }}
           TZ: Europe/Berlin       # Skript rechnet in deutscher Ortszeit (inkl. Sommerzeit)
           PROTOKOLL_DIR: ${{ steps.prot.outcome == 'success' && 'protokoll-repo' || '' }}
-          # Zeitplan-Lauf: immer "auto" und scharf; manueller Lauf: Auswahl aus dem Formular
-          CMD: ${{ github.event_name == 'schedule' && 'auto' || inputs.command }}
-          DRY: ${{ github.event_name != 'schedule' && inputs.dry_run && '--dry-run' || '' }}
-          STILL: ${{ github.event_name == 'schedule' }}
+          # "extern" (cron-job.org): immer "auto", scharf und still; sonst: Auswahl aus dem Formular
+          CMD: ${{ inputs.command == 'extern' && 'auto' || inputs.command }}
+          DRY: ${{ inputs.command != 'extern' && inputs.dry_run && '--dry-run' || '' }}
+          STILL: ${{ inputs.command == 'extern' }}
         run: |
           # Manueller Lauf: volle Ausgabe (danach ggf. Run löschen).
           if [ "$STILL" != "true" ]; then
@@ -81,7 +80,7 @@ jobs:
             exit $?
           fi
 
-          # Zeitplan-Lauf = stiller Modus: Das öffentliche Log zeigt keine Werte (SOC, Modus …),
+          # Externer Lauf = stiller Modus: Das öffentliche Log zeigt keine Werte (SOC, Modus …),
           # nur OK / Warnung / Fehler. Details stehen im privaten Protokoll.
           LOG="$RUNNER_TEMP/lauf.log"
           set +e
@@ -131,21 +130,3 @@ jobs:
         if: env.HAT_PROTOKOLL == 'true' && steps.prot.outcome != 'success'
         run: echo "::warning::Protokoll-Repo ${{ env.PROTOKOLL_REPO }} nicht erreichbar – Token abgelaufen oder Repo-Name falsch? Die Steuerung lief trotzdem."
 
-      # GitHub deaktiviert Zeitpläne in öffentlichen Repos nach 60 Tagen ohne Commit.
-      # Da das Protokoll im privaten Repo landet, gibt es hier sonst keine Commits.
-      # Lösung: Ist der letzte Commit älter als 45 Tage, wird ein LEERER Commit erzeugt
-      # (enthält keinerlei Daten, nur die Meldung "keepalive").
-      - name: Keepalive (60-Tage-Regel)
-        if: github.event_name == 'schedule'
-        continue-on-error: true
-        run: |
-          letzter=$(git log -1 --format=%ct)
-          alter_tage=$(( ( $(date +%s) - letzter ) / 86400 ))
-          if [ "$alter_tage" -ge 45 ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit --allow-empty -m "keepalive"
-            git push --quiet && echo "Keepalive-Commit erstellt (letzter Commit war $alter_tage Tage alt)."
-          else
-            echo "Kein Keepalive nötig (letzter Commit vor $alter_tage Tagen)."
-          fi

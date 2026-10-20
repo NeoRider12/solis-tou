@@ -1,6 +1,6 @@
 # Solis Time of Use – Akkus nachts schlafen legen
 
-Steuert den „Time of Use“-Schalter (TOU) eines Solis RAI-3K-48ES-5G über die SolisCloud-API. Das läuft ganzjährig per GitHub Actions, ohne eigene Hardware.
+Steuert den „Time of Use“-Schalter (TOU) eines Solis RAI-3K-48ES-5G über die SolisCloud-API. Das läuft ganzjährig per GitHub Actions, ohne eigene Hardware. Gestartet wird stündlich und pünktlich von [cron-job.org](https://cron-job.org).
 
 > Privates Hobbyprojekt, ohne Gewähr. Es schreibt Einstellungen in deinen Wechselrichter. Nutzung auf eigenes Risiko (siehe `LICENSE`).
 
@@ -15,7 +15,7 @@ Im Wechselrichter ist ein **Ladeslot mit 0,1 A** eingestellt. Ist TOU an, lädt 
 | SOC-Prüfung, stündlich | 18:00–06:59 | 20:00–06:59 |
 | TOU an bei | **SOC ≤ 30 %** | **SOC ≤ 15 %** |
 | Ladeslot 1 | 18:00–07:00, 0,1 A | 20:00–07:00, 0,1 A |
-| TOU aus | ab 07:00, Sicherungen bis 10/11 Uhr | ab 07:00, Sicherungen bis 10 Uhr |
+| TOU aus | ab 07:00, Sicherungen bis 10 Uhr | ab 07:00, Sicherungen bis 10 Uhr |
 
 - In der Prüfphase wird **nur eingeschaltet, nie ausgeschaltet**.
 - **Saisonwechsel:** Morgens prüft das Skript, ob Ladeslot 1 zur kommenden Nacht passt. Am 16.03. und am 01.10. setzt es ihn automatisch auf das neue Profil. Die Entladezeiten und die Slots 2 und 3 bleiben dabei unverändert.
@@ -36,7 +36,7 @@ Zugangsdaten stehen nie im Code, sondern nur in den **Secrets** dieses Repos. Se
 |---|---|
 | `solis_tou.py` | Das Skript (status / auto / on / off / sommer / winter / protokoll) |
 | `requirements.txt` | Python-Abhängigkeit (`requests`) |
-| `.github/workflows/solis-tou.yml` | Zeitplan, manueller Start, Protokoll-Speicherung, Keepalive |
+| `.github/workflows/solis-tou.yml` | externer Start (cron-job.org), manueller Start, Protokoll-Speicherung |
 | `ZEITPLAN.md` | Tabelle aller Läufe und Schaltzeiten |
 
 ## Einrichtung
@@ -67,12 +67,43 @@ Zugangsdaten stehen nie im Code, sondern nur in den **Secrets** dieses Repos. Se
    - Einmal `winter` bzw. `sommer` (je nach aktueller Saison) **ohne** Dry-Run starten. Damit steht Ladeslot 1 sicher auf **0,1 A** und der richtigen Zeit. Wichtig, falls dort vorher ein höherer Ladestrom eingestellt war: Sonst lädt der Wechselrichter nachts mit diesem Strom aus dem Netz, sobald TOU angeht.
    - Danach in der Solis-App kontrollieren, dass Slot 1 wirklich 0,1 A zeigt (die API liest 0,1 A als `0`).
 
-**Zeitzone:** Workflow und Skript rechnen mit deutscher Ortszeit (`TZ: Europe/Berlin` im Workflow), der `cron` ist darauf abgestimmt. Wer woanders wohnt, muss `TZ` und die `cron`-Zeilen anpassen (GitHub rechnet `cron` immer in UTC).
+7. **cron-job.org einrichten** (nächster Abschnitt). Ohne diesen Schritt läuft nichts automatisch.
+
+**Zeitzone:** Das Skript rechnet mit deutscher Ortszeit (`TZ: Europe/Berlin` im Workflow), der cron-job.org-Job ebenfalls. Wer woanders wohnt, passt beides an.
+
+## Stündlich starten mit cron-job.org
+
+GitHubs eigener Zeitplan (`schedule`) startet nur „nach bestem Bemühen“: oft 30–60 Minuten zu spät, manchmal gar nicht. Deshalb gibt es hier keinen GitHub-Zeitplan. Stattdessen startet der kostenlose Dienst [cron-job.org](https://cron-job.org) den Workflow auf die Minute genau über die GitHub-API.
+
+**1. Token für den Start erstellen** (GitHub → Settings → Developer settings → Fine-grained tokens):
+- *Repository access:* nur dieses Repo
+- *Permissions:* **Actions: Read and write** (sonst nichts)
+- Ablaufdatum notieren und rechtzeitig erneuern.
+
+**2. Job bei cron-job.org anlegen:**
+
+| Feld | Wert |
+|---|---|
+| URL | `https://api.github.com/repos/<dein-name>/<dieses-repo>/actions/workflows/solis-tou.yml/dispatches` |
+| Zeitplan | Benutzerdefiniert: Minute **5**, Stunden **18–23 und 0–10**, jeden Tag |
+| Zeitzone | **Europe/Berlin** (dann gibt es kein Sommer-/Winterzeit-Problem) |
+| Methode (Erweitert) | **POST** |
+| Header | `Authorization: Bearer <Token>` · `Accept: application/vnd.github+json` · `X-GitHub-Api-Version: 2022-11-28` · `Content-Type: application/json` |
+| Body | `{"ref":"main","inputs":{"command":"extern"}}` |
+| Benachrichtigung | bei Fehlschlag per E-Mail |
+
+Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der Läufe heißt er dann *„Extern (cron-job.org)“*, manuelle Läufe heißen *„Manuell: …“*. Die Stunden 18–10 passen für beide Saisons: Im Sommer sind die Läufe um 18 und 19 Uhr nur Aus-Sicherungen.
+
+**Ohne Reserve:** Fällt cron-job.org aus, läuft nichts. Deshalb die Fehler-Benachrichtigung dort einschalten. Notfalls von Hand starten (*Run workflow* → `auto` ohne Dry-Run). Bleibt TOU morgens versehentlich an, passiert tagsüber nichts (siehe *Sicherheit*).
+
+**Was kann jemand mit diesem Token?** Nur Läufe dieses Repos starten, abbrechen, löschen und deren Logs lesen – keinen Code ändern, keine Secrets lesen. Starten kann er auch `on`/`off`/`sommer`/`winter`, also nur die fest im Skript hinterlegten, sicheren Aktionen (schlimmstenfalls schlafen die Akkus eine Nacht nicht). Bei Verdacht: Token in GitHub löschen, neu erstellen, bei cron-job.org tauschen.
+
+**Actions-Minuten:** Öffentlich kostenlos. Im privaten Repo ca. 17 Läufe/Tag ≈ 530 min/Monat (frei sind 2.000).
 
 ## Was öffentlich sichtbar ist
 
 - **Liste der Läufe** (Uhrzeit, Dauer, grün/rot): für jeden sichtbar, nicht abschaltbar.
-- **Zeitplan-Läufe laufen im stillen Modus:** Das Log zeigt nur `Lauf OK`, eine Warnung oder einen Fehler – keine SOC-Werte, keinen Speichermodus, keine Ladeslots. Bei Warnung oder Fehler legt der Workflow das vollständige Log ins private Repo: `protokoll/letzter-problemlauf.txt`.
+- **Externe Läufe (cron-job.org) laufen im stillen Modus:** Das Log zeigt nur `Lauf OK`, eine Warnung oder einen Fehler – keine SOC-Werte, keinen Speichermodus, keine Ladeslots. Bei Warnung oder Fehler legt der Workflow das vollständige Log ins private Repo: `protokoll/letzter-problemlauf.txt`.
 - **Manuelle Läufe** (`status`, `on`, …) zeigen die volle Ausgabe. Danach bei Bedarf löschen: Lauf öffnen → „…“ → *Delete workflow run*.
 - **Zugangsdaten** erscheinen nie, sie werden immer als `***` ausgeblendet.
 - **Empfehlung:** *Settings → Actions → General → Artifact and log retention* auf **1 Tag** stellen.
@@ -92,7 +123,7 @@ LETZTE_AUS_SICHERUNG = 10
 LADESLOT_ABGLEICH = True  # False = Ladeslot nie automatisch ändern
 ```
 
-Wenn du `pruef_beginn` änderst, prüf auch den `cron` im Workflow. Die Läufe müssen die neue Uhrzeit abdecken.
+Wenn du `pruef_beginn` änderst, prüf auch die Stunden im cron-job.org-Job. Die Läufe müssen die neue Uhrzeit abdecken.
 
 ## Protokoll
 
@@ -109,13 +140,7 @@ So funktioniert es:
 - Dry-Runs und `status` werden nicht protokolliert.
 - **Fehlt der Token oder ist er ungültig, läuft die Steuerung trotzdem**, nur ohne Protokoll. Im Lauf erscheint dann eine gelbe Warnung.
 
-**Wichtig für GitHub Desktop:** Im Repo `solis-protokoll` schreibt der Workflow selbst. Wenn du es lokal geklont hast, vor eigenen Änderungen immer zuerst **„Fetch origin“ / „Pull origin“**. Im öffentlichen Repo kommt nur alle ~45 Tage ein leerer Keepalive-Commit dazu, auch hier also vor einem Push kurz „Pull“.
-
-## 60-Tage-Regel (Keepalive)
-
-GitHub deaktiviert Zeitpläne in öffentlichen Repos, wenn dort 60 Tage lang kein Commit war. Da das Protokoll ins private Repo geht, legt der Workflow im öffentlichen Repo automatisch einen **leeren Commit** „keepalive“ an, sobald der letzte Commit 45 Tage alt ist. Der Commit enthält keinerlei Daten.
-
-Sollte der Zeitplan trotzdem einmal deaktiviert werden, schickt GitHub vorher eine E-Mail. Dann unter *Actions → Solis Time of Use* auf **„Enable workflow“** klicken.
+**Wichtig für GitHub Desktop:** Im Repo `solis-protokoll` schreibt der Workflow selbst. Wenn du es lokal geklont hast, vor eigenen Änderungen immer zuerst **„Fetch origin“ / „Pull origin“**.
 
 ## Sicherheit
 
@@ -134,12 +159,7 @@ Sollte der Zeitplan trotzdem einmal deaktiviert werden, schickt GitHub vorher ei
 
 ## Actions-Minuten
 
-In **öffentlichen** Repos sind die Minuten auf Standard-Runnern kostenlos und werden nicht vom Kontingent abgezogen. Zur Einordnung trotzdem der Verbrauch (jeder Lauf zählt als volle Minute):
-
-| Fall | Winter (18 Läufe/Tag) | Sommer (15 Läufe/Tag) |
-|---|---|---|
-| Normal | ca. 570–620 min/Monat | ca. 470–530 min/Monat |
-| Schlecht (Solis-Cloud den ganzen Monat gestört) | ca. 1.120 min | ca. 930 min |
+In **öffentlichen** Repos sind die Minuten auf Standard-Runnern kostenlos. Im privaten Repo: ca. 17 Läufe pro Tag, jeder zählt als volle Minute → ca. 530 min/Monat, bei gestörter Solis-Cloud bis ca. 1.000 min (frei sind 2.000).
 
 Das Skript bricht nach spätestens 80 s ab, die Notbremse von GitHub greift nach 3 min.
 
