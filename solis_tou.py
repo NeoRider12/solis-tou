@@ -90,16 +90,17 @@ LADESTROM = "0.1"         # Ladestrom von Slot 1 in A (lässt die Pylontech-BMS 
 
 # Entladegrenze (Overdischarge-SOC): Darunter entlädt der Wechselrichter den Akku nicht weiter.
 # Im Winter (Nov–Feb) 30 % als Puffer, sonst ODSOC_NORMAL.
-# SICHERHEIT: Die CID ist noch NICHT bestätigt. Erst mit dem Befehl "grenzen" prüfen,
-# welche CID den Wert aus der Solis-App zeigt, dann ODSOC_CID eintragen, ODSOC_NORMAL
-# auf deinen bisherigen Wert setzen und ODSOC_STEUERN = True.
-ODSOC_STEUERN = False
-ODSOC_CID = 158           # Vermutung, siehe GRENZEN_KANDIDATEN
-ODSOC_NORMAL = None       # dein bisheriger Overdischarge-SOC in %, z. B. 15
-GRENZEN_KANDIDATEN = {    # werden von "grenzen" nur gelesen
-    157: "vermutlich Reserve-/Backup-SOC",
-    158: "vermutlich Overdischarge-SOC",
-    160: "vermutlich Force-Charge-SOC",
+# CID 158 ist bei RAI-3K-48ES-5G bestätigt. Andere Geräte: erst mit "grenzen" prüfen, welche
+# CID den Wert aus der Solis-App zeigt, bevor ODSOC_STEUERN = True gesetzt wird.
+# Schwelle (soc) und Entladegrenze (odsoc) bewusst IDENTISCH halten: Der Akku entlädt bis zur
+# Grenze, schläft dort ein und bleibt nach dem Ausschalten morgens sparsam im Standby.
+ODSOC_STEUERN = True
+ODSOC_CID = 158           # bestätigt am 23.10.2026 (Abgleich mit der Solis-App)
+ODSOC_NORMAL = 15         # Overdischarge-SOC außerhalb des Winters (bewusst = SOC-Schwelle)
+GRENZEN_KANDIDATEN = {    # werden von "grenzen" nur gelesen (beim RAI-3K-48ES-5G bestätigt)
+    157: "Reserve-/Backup-SOC",
+    158: "Overdischarge-SOC (Entladegrenze)",
+    160: "Force-Charge-SOC (darunter Netzladung)",
 }
 ZEITZONE = ZoneInfo("Europe/Berlin")
 

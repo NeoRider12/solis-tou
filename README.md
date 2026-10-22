@@ -125,10 +125,11 @@ Im Winter reicht die Sonne selten, um die Akkus voll zu laden. Damit sie nicht w
 
 - **2 Schreibvorgänge im Jahr** (1. November und 1. März, jeweils morgens).
 - **Kontrolle:** Nach dem Schreiben wird zurückgelesen. Zusätzlich vergleicht jeder Morgenlauf den Wert mit dem Plan und schreibt bei Abweichung erneut (höchstens einmal pro Lauf). Fällt ein Lauf aus, holt es der nächste nach.
-- **Ab Werk ausgeschaltet**, weil die passende CID noch bestätigt werden muss:
+- **CID:** Beim RAI-3K-48ES-5G ist es **CID 158** (157 = Reserve-/Backup-SOC, 160 = Force-Charge-SOC), die Steuerung ist eingeschaltet. **Bei anderen Geräten** vorher prüfen und ggf. `ODSOC_STEUERN = False` setzen:
   1. *Run workflow* → `grenzen` starten. Das liest drei Kandidaten (CID 157, 158, 160) nur aus.
   2. Die Werte mit der Solis-App vergleichen: Welche CID zeigt den Overdischarge-SOC? (Sicherheitshalber den Wert in der App kurz testweise ändern und `grenzen` erneut starten.)
-  3. Im Skript `ODSOC_CID` eintragen, `ODSOC_NORMAL` auf deinen bisherigen Wert setzen und `ODSOC_STEUERN = True`.
+  3. Im Skript `ODSOC_CID` eintragen, `ODSOC_NORMAL` prüfen (Normalwert, hier 15 %) und `ODSOC_STEUERN = True`.
+- **Schwelle und Entladegrenze bewusst gleich:** Der Akku entlädt bis zur Grenze und schläft genau dort ein. Morgens nach dem Ausschalten bleibt er im sparsamen Standby, statt weiter zu entladen.
 - Werte außerhalb 5–50 % schreibt das Skript nie.
 
 ## Einstellungen (oben in `solis_tou.py`)
@@ -142,9 +143,9 @@ MONATSPLAN = {
     12: {"abend": 16, "soc": 15},
 }
 LADESTROM = "0.1"         # Ladestrom von Slot 1 in A
-ODSOC_STEUERN = False     # Entladegrenze steuern (erst nach Prüfung mit "grenzen")
-ODSOC_CID = 158           # CID des Overdischarge-SOC
-ODSOC_NORMAL = None       # Entladegrenze außerhalb des Winters, z. B. 15
+ODSOC_STEUERN = True      # Entladegrenze steuern (andere Geräte: erst mit "grenzen" prüfen)
+ODSOC_CID = 158           # CID des Overdischarge-SOC (RAI-3K-48ES-5G)
+ODSOC_NORMAL = 15         # Entladegrenze außerhalb des Winters
 PRUEF_ENDE = 6            # letzte Prüfung 06:00–06:59
 AUS_BEGINN = 7            # ab hier TOU aus
 LETZTE_AUS_SICHERUNG = 10
