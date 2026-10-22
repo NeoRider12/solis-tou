@@ -27,7 +27,8 @@ Aufruf
   python3 solis_tou.py auto [--dry-run]  # automatischer Lauf (GitHub-Zeitplan)
   python3 solis_tou.py on   [--dry-run]  # TOU sofort einschalten
   python3 solis_tou.py off  [--dry-run]  # TOU sofort ausschalten
-  python3 solis_tou.py ladeslot [--dry-run]  # Ladeslot 1 sofort auf den heutigen Plan
+  python3 solis_tou.py ladeslot [--dry-run]  # Ladeslot 1 (+ Entladegrenze) sofort auf den heutigen Plan
+  python3 solis_tou.py grenzen           # SOC-Grenzen im Wechselrichter nur lesen
   python3 solis_tou.py protokoll         # PROTOKOLL.md neu erzeugen und anzeigen
 
 Protokoll (optional): Ist die Umgebungsvariable PROTOKOLL_DIR gesetzt, wird jede
@@ -66,24 +67,40 @@ import requests
 #   abend_sz = abweichender Abendbeginn, solange Sommerzeit gilt (nur März und Oktober nötig;
 #              die Zeitumstellung erkennt das Skript selbst)
 #   soc      = TOU an, wenn SOC <= diesem Wert (kostet keine Schreibvorgänge, frei änderbar)
+#   odsoc    = Entladegrenze (Overdischarge-SOC) im Wechselrichter für diesen Monat;
+#              fehlt der Eintrag, gilt ODSOC_NORMAL. Wird nur geschrieben, wenn sie sich ändert.
 # Abendbeginn = Sonnenuntergang −1 Std., spätester Wert des Monats, auf volle Stunde aufgerundet.
 # ACHTUNG: Wird ein Abendbeginn früher als 16 Uhr gelegt, den cron-job.org-Job erweitern
 #          (er startet erst ab 16:05).
 MONATSPLAN = {
-    1:  {"abend": 17, "soc": 30},
-    2:  {"abend": 18, "soc": 30},
-    3:  {"abend": 18, "abend_sz": 19, "soc": 25},
-    4:  {"abend": 20, "soc": 20},
+    1:  {"abend": 17, "soc": 30, "odsoc": 30},
+    2:  {"abend": 18, "soc": 30, "odsoc": 30},
+    3:  {"abend": 18, "abend_sz": 19, "soc": 15},
+    4:  {"abend": 20, "soc": 15},
     5:  {"abend": 21, "soc": 15},
     6:  {"abend": 21, "soc": 15},
     7:  {"abend": 21, "soc": 15},
     8:  {"abend": 21, "soc": 15},
-    9:  {"abend": 20, "soc": 20},
-    10: {"abend": 17, "abend_sz": 19, "soc": 25},
-    11: {"abend": 17, "soc": 30},
-    12: {"abend": 16, "soc": 30},
+    9:  {"abend": 20, "soc": 15},
+    10: {"abend": 17, "abend_sz": 19, "soc": 15},
+    11: {"abend": 17, "soc": 30, "odsoc": 30},
+    12: {"abend": 16, "soc": 30, "odsoc": 30},
 }
 LADESTROM = "0.1"         # Ladestrom von Slot 1 in A (lässt die Pylontech-BMS schlafen)
+
+# Entladegrenze (Overdischarge-SOC): Darunter entlädt der Wechselrichter den Akku nicht weiter.
+# Im Winter (Nov–Feb) 30 % als Puffer, sonst ODSOC_NORMAL.
+# SICHERHEIT: Die CID ist noch NICHT bestätigt. Erst mit dem Befehl "grenzen" prüfen,
+# welche CID den Wert aus der Solis-App zeigt, dann ODSOC_CID eintragen, ODSOC_NORMAL
+# auf deinen bisherigen Wert setzen und ODSOC_STEUERN = True.
+ODSOC_STEUERN = False
+ODSOC_CID = 158           # Vermutung, siehe GRENZEN_KANDIDATEN
+ODSOC_NORMAL = None       # dein bisheriger Overdischarge-SOC in %, z. B. 15
+GRENZEN_KANDIDATEN = {    # werden von "grenzen" nur gelesen
+    157: "vermutlich Reserve-/Backup-SOC",
+    158: "vermutlich Overdischarge-SOC",
+    160: "vermutlich Force-Charge-SOC",
+}
 ZEITZONE = ZoneInfo("Europe/Berlin")
 
 PRUEF_ENDE = 6            # letzte Prüfung in der Stunde 06:00–06:59
@@ -198,7 +215,7 @@ def werte_nacht_aus(d: date, evs: list[dict], vorbei: bool = True) -> dict:
     morgen = next((e for e in evs if e["ereignis"] == "MORGEN"), None)
     hinweise, fehler = [], 0
     for e in evs:
-        if e["ereignis"] in ("FEHLER", "WARNUNG", "LADESLOT"):
+        if e["ereignis"] in ("FEHLER", "WARNUNG", "LADESLOT", "ENTLADEGRENZE"):
             hinweise.append(f"{e['zeit'][11:]} {e['ereignis'].capitalize()}: {e['info']}")
             fehler += e["ereignis"] == "FEHLER"
         elif e["ereignis"] in ("TOU_AN", "TOU_AUS") and e["quelle"] != "auto":
@@ -442,7 +459,7 @@ def plan(d: date) -> dict:
     m = MONATSPLAN[d.month]
     sommerzeit = bool(datetime(d.year, d.month, d.day, 18, tzinfo=ZEITZONE).dst())
     abend = m["abend_sz"] if sommerzeit and "abend_sz" in m else m["abend"]
-    return {"abend": abend, "soc": m["soc"],
+    return {"abend": abend, "soc": m["soc"], "odsoc": m.get("odsoc", ODSOC_NORMAL),
             "ladezeit": f"{abend:02d}:00-{AUS_BEGINN:02d}:00"}
 
 
@@ -603,9 +620,70 @@ def ladeslot_abgleich(now: datetime, dry_run: bool) -> None:
     setze_ladeslot(heute, dry_run, alt)
 
 
+def odsoc_aktiv() -> bool:
+    return ODSOC_STEUERN and ODSOC_NORMAL is not None
+
+
+def setze_entladegrenze(d: date, dry_run: bool, alt: str | None = None) -> bool:
+    """Setzt den Overdischarge-SOC (ODSOC_CID) auf den Plan der Nacht ab Tag d.
+    Ein Schreibbefehl, danach Kontrolle durch Zurücklesen."""
+    ziel = plan(d)["odsoc"]
+    if alt is None:
+        alt = read_cid(ODSOC_CID)
+    try:
+        ist = int(float(alt))
+    except ValueError:
+        raise Fehler(f"Entladegrenze (CID {ODSOC_CID}) unlesbar: {alt!r}")
+    if not 5 <= ziel <= 50:
+        raise Fehler(f"Entladegrenze {ziel} % außerhalb 5–50 % – bitte MONATSPLAN prüfen")
+    if ist == ziel:
+        print(f"Entladegrenze passt zum Plan ({ist} %).")
+        return True
+    print(f"Entladegrenze {ist} % → {ziel} % (Plan ab {d:%d.%m.})")
+    if dry_run:
+        print("Dry-Run – es wurde nichts geschrieben.")
+        return True
+    write_cid(ODSOC_CID, str(ziel), alt)
+    print("Schreibbefehl von der Cloud angenommen.")
+    if restzeit() < 25:
+        protokolliere("ENTLADEGRENZE", None, f"{ist} → {ziel} %, ohne Kontrolle (Zeitbudget)")
+        print("Kein Zeitbudget mehr für die Kontrolle – der nächste Lauf prüft erneut.")
+        return True
+    time.sleep(15)
+    zurueck = read_cid(ODSOC_CID)
+    ok = zurueck.strip() not in ("", "-") and int(float(zurueck)) == ziel
+    protokolliere("ENTLADEGRENZE", None, f"{ist} → {ziel} %, {'bestätigt' if ok else 'unbestätigt'}")
+    if ok:
+        print(f"OK – Entladegrenze {ziel} % bestätigt.")
+        return True
+    print(f"::warning::Entladegrenze noch nicht bestätigt (gelesen: {zurueck}) – der nächste Lauf prüft erneut.")
+    return False
+
+
+def entladegrenze_abgleich(now: datetime, dry_run: bool) -> None:
+    """Morgens: Entladegrenze mit dem Plan der kommenden Nacht vergleichen (nur lesen),
+    bei Abweichung einmal schreiben. Fehlt das Zeitbudget, macht es der nächste Lauf."""
+    if restzeit() < 35:
+        print("Entladegrenze-Abgleich übersprungen (Zeitbudget) – nächster Lauf.")
+        return
+    setze_entladegrenze(now.date(), dry_run)
+
+
+def zeige_grenzen() -> None:
+    """Liest die Kandidaten-CIDs für SOC-Grenzen (nur lesen) – zum Abgleich mit der Solis-App."""
+    print("SOC-Grenzen (nur gelesen) – bitte mit den Werten in der Solis-App vergleichen:")
+    for cid, text in GRENZEN_KANDIDATEN.items():
+        try:
+            wert = read_cid(cid)
+        except Fehler as e:
+            wert = f"nicht lesbar ({e})"
+        print(f"  CID {cid}: {wert!s:>6}   ({text})")
+    print(f"Eingestellt: ODSOC_CID = {ODSOC_CID}, Steuerung {'AKTIV' if odsoc_aktiv() else 'aus'}")
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Solis TOU / Akku-Schlaf per SolisCloud-API")
-    p.add_argument("command", choices=["status", "auto", "on", "off", "ladeslot", "protokoll"])
+    p.add_argument("command", choices=["status", "auto", "on", "off", "ladeslot", "grenzen", "protokoll"])
     p.add_argument("--dry-run", action="store_true", help="nur anzeigen, nichts schreiben")
     a = p.parse_args()
 
@@ -641,7 +719,14 @@ def main() -> int:
 
 def _ablauf(a, now: datetime) -> int:
     if a.command == "ladeslot":
-        return 0 if setze_ladeslot(now.date(), a.dry_run) else 1
+        ok = setze_ladeslot(now.date(), a.dry_run)
+        if odsoc_aktiv():
+            ok = setze_entladegrenze(now.date(), a.dry_run) and ok
+        return 0 if ok else 1
+
+    if a.command == "grenzen":
+        zeige_grenzen()
+        return 0
 
     if a.command in ("on", "off"):
         return 0 if schalte(a.command == "on", a.dry_run) else 1
@@ -677,6 +762,13 @@ def _ablauf(a, now: datetime) -> int:
               f"Ladeslot {n['ladezeit']} mit {LADESTROM} A")
         if h != n:
             print(f"Plan ab heute Abend: {plan_text(now.date())}, Ladeslot {h['ladezeit']}")
+        if odsoc_aktiv():
+            try:
+                print(f"Entladegrenze (CID {ODSOC_CID}): {read_cid(ODSOC_CID)} %, Plan ab heute Abend {h['odsoc']} %")
+            except Fehler as e:
+                print(f"Entladegrenze nicht lesbar: {e}")
+        else:
+            print("Entladegrenze: Steuerung aus (erst CID mit 'grenzen' prüfen, dann ODSOC_STEUERN = True)")
         try:
             print(f"Lade-/Entladezeiten (CID {CID_CHARGE_DISCHARGE}): {read_cid(CID_CHARGE_DISCHARGE)}")
         except Fehler as e:
@@ -698,6 +790,12 @@ def _ablauf(a, now: datetime) -> int:
             ladeslot_abgleich(now, a.dry_run)
         except Fehler as e:
             print(f"::warning::Ladeslot-Abgleich fehlgeschlagen: {e}")
+        if odsoc_aktiv():
+            try:
+                entladegrenze_abgleich(now, a.dry_run)
+            except Fehler as e:
+                print(f"::warning::Entladegrenze-Abgleich fehlgeschlagen: {e}")
+                protokolliere("WARNUNG", None, f"Entladegrenze-Abgleich: {e}")
     return rc
 
 

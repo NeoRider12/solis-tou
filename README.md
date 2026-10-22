@@ -12,19 +12,19 @@ Im Wechselrichter ist ein **Ladeslot mit 0,1 A** eingestellt. Ist TOU an, lädt 
 
 **Monatsplan** (`MONATSPLAN` im Skript): Der Abendbeginn ist Sonnenuntergang −1 Std., jeweils der späteste Wert des Monats, auf die volle Stunde aufgerundet. So beginnt der Akkuschlaf nie, solange die Sonne noch laden könnte – **die Sonne hat Vorrang**. Berechnet für Norddeutschland (ca. 52° N), für andere Orte anpassen.
 
-| Monat | Abendbeginn = Start Ladeslot 1 | TOU an bei |
-|---|---|---|
-| Januar | 17:00 | SOC ≤ 30 % |
-| Februar | 18:00 | SOC ≤ 30 % |
-| März | 18:00, ab Sommerzeit 19:00 | SOC ≤ 25 % |
-| April | 20:00 | SOC ≤ 20 % |
-| Mai–August | 21:00 | SOC ≤ 15 % |
-| September | 20:00 | SOC ≤ 20 % |
-| Oktober | 19:00, ab Winterzeit 17:00 | SOC ≤ 25 % |
-| November | 17:00 | SOC ≤ 30 % |
-| Dezember | 16:00 | SOC ≤ 30 % |
+| Monat | Abendbeginn = Start Ladeslot 1 |
+|---|---|
+| Januar | 17:00 |
+| Februar | 18:00 |
+| März | 18:00, ab Sommerzeit 19:00 |
+| April | 20:00 |
+| Mai–August | 21:00 |
+| September | 20:00 |
+| Oktober | 19:00, ab Winterzeit 17:00 |
+| November | 17:00 |
+| Dezember | 16:00 |
 
-Ladeslot 1 läuft immer vom Abendbeginn bis **07:00** mit **0,1 A**. TOU aus ab 07:00, Aus-Sicherungen bis 10 Uhr.
+TOU an bei **SOC ≤ 15 %**, von **November bis Februar ≤ 30 %** (je Monat änderbar, kostet keine Schreibvorgänge). In diesen Wintermonaten kann das Skript zusätzlich die **Entladegrenze** auf 30 % setzen (siehe unten). Ladeslot 1 läuft immer vom Abendbeginn bis **07:00** mit **0,1 A**. TOU aus ab 07:00, Aus-Sicherungen bis 10 Uhr.
 
 - In der Prüfphase wird **nur eingeschaltet, nie ausgeschaltet**.
 - **Ladeslot nachführen:** Morgens prüft das Skript, ob Ladeslot 1 zur kommenden Nacht passt, und setzt ihn bei Bedarf neu – nur bei einem neuen Abendbeginn und bei der Zeitumstellung, also ca. 8× im Jahr. Die SOC-Schwelle wird nie geschrieben, sie gilt nur im Skript. Entladezeiten und die Slots 2 und 3 bleiben unverändert.
@@ -44,7 +44,7 @@ Zugangsdaten stehen nie im Code, sondern nur in den **Secrets** dieses Repos. Se
 
 | Datei | Zweck |
 |---|---|
-| `solis_tou.py` | Das Skript (status / auto / on / off / ladeslot / protokoll) |
+| `solis_tou.py` | Das Skript (status / auto / on / off / ladeslot / grenzen / protokoll) |
 | `requirements.txt` | Python-Abhängigkeit (`requests`) |
 | `.github/workflows/solis-tou.yml` | externer Start (cron-job.org), manueller Start, Protokoll-Speicherung |
 | `ZEITPLAN.md` | Tabelle aller Läufe und Schaltzeiten |
@@ -69,7 +69,8 @@ Zugangsdaten stehen nie im Code, sondern nur in den **Secrets** dieses Repos. Se
    - `status` zeigt Plan, Speichermodus, SOC, Ladeslots und die aktuelle Entscheidung.
    - `auto` führt den normalen Lauf aus. Mit Dry-Run siehst du nur, was geschaltet würde.
    - `on` / `off` schalten TOU sofort.
-   - `ladeslot` setzt Ladeslot 1 sofort auf den Plan von heute Abend.
+   - `ladeslot` setzt Ladeslot 1 (und, falls aktiviert, die Entladegrenze) sofort auf den Plan von heute Abend.
+   - `grenzen` liest die SOC-Grenzen im Wechselrichter aus (nur lesen).
    - `protokoll` erzeugt `PROTOKOLL.md` im privaten Repo neu und zeigt die Tabelle im Log an.
 6. **Erster Test und Ladeslot setzen:**
    - `status` starten und prüfen: Der Speichermodus (CID 636) sollte **1** (TOU aus) bzw. **3** (TOU an) zeigen. Steht dort etwas anderes, ist dein Gerät anders belegt – dann **nicht** scharf schalten, sondern erst die Bits prüfen.
@@ -106,7 +107,7 @@ Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der 
 
 **Ohne Reserve:** Fällt cron-job.org aus, läuft nichts. Deshalb die Fehler-Benachrichtigung dort einschalten. Notfalls von Hand starten (*Run workflow* → `auto` ohne Dry-Run). Bleibt TOU morgens versehentlich an, passiert tagsüber nichts (siehe *Sicherheit*).
 
-**Was kann jemand mit diesem Token?** Nur Läufe dieses Repos starten, abbrechen, löschen und deren Logs lesen – keinen Code ändern, keine Secrets lesen. Starten kann er auch `on`/`off`/`ladeslot`, also nur die fest im Skript hinterlegten, sicheren Aktionen (schlimmstenfalls schlafen die Akkus eine Nacht nicht). Bei Verdacht: Token in GitHub löschen, neu erstellen, bei cron-job.org tauschen.
+**Was kann jemand mit diesem Token?** Nur Läufe dieses Repos starten, abbrechen, löschen und deren Logs lesen – keinen Code ändern, keine Secrets lesen. Starten kann er auch `on`/`off`/`ladeslot`/`grenzen`, also nur die fest im Skript hinterlegten, sicheren Aktionen (schlimmstenfalls schlafen die Akkus eine Nacht nicht). Bei Verdacht: Token in GitHub löschen, neu erstellen, bei cron-job.org tauschen.
 
 **Actions-Minuten:** Öffentlich kostenlos. Im privaten Repo ca. 19 Läufe/Tag ≈ 590 min/Monat (frei sind 2.000).
 
@@ -118,17 +119,32 @@ Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der 
 - **Zugangsdaten** erscheinen nie, sie werden immer als `***` ausgeblendet.
 - **Empfehlung:** *Settings → Actions → General → Artifact and log retention* auf **1 Tag** stellen.
 
+## Entladegrenze im Winter (optional)
+
+Im Winter reicht die Sonne selten, um die Akkus voll zu laden. Damit sie nicht wochenlang am unteren Rand hängen, kann das Skript die **Entladegrenze** (Overdischarge-SOC, in der App unter *Battery settings*) von **November bis Februar auf 30 %** setzen und am 1. März wieder auf deinen Normalwert. Der Wechselrichter entlädt den Akku dann nicht unter 30 %, und das Skript legt ihn bei SOC ≤ 30 % schlafen.
+
+- **2 Schreibvorgänge im Jahr** (1. November und 1. März, jeweils morgens).
+- **Kontrolle:** Nach dem Schreiben wird zurückgelesen. Zusätzlich vergleicht jeder Morgenlauf den Wert mit dem Plan und schreibt bei Abweichung erneut (höchstens einmal pro Lauf). Fällt ein Lauf aus, holt es der nächste nach.
+- **Ab Werk ausgeschaltet**, weil die passende CID noch bestätigt werden muss:
+  1. *Run workflow* → `grenzen` starten. Das liest drei Kandidaten (CID 157, 158, 160) nur aus.
+  2. Die Werte mit der Solis-App vergleichen: Welche CID zeigt den Overdischarge-SOC? (Sicherheitshalber den Wert in der App kurz testweise ändern und `grenzen` erneut starten.)
+  3. Im Skript `ODSOC_CID` eintragen, `ODSOC_NORMAL` auf deinen bisherigen Wert setzen und `ODSOC_STEUERN = True`.
+- Werte außerhalb 5–50 % schreibt das Skript nie.
+
 ## Einstellungen (oben in `solis_tou.py`)
 
 ```python
 MONATSPLAN = {
-    1:  {"abend": 17, "soc": 30},
+    1:  {"abend": 17, "soc": 30, "odsoc": 30},
     # …
-    3:  {"abend": 18, "abend_sz": 19, "soc": 25},   # abend_sz = solange Sommerzeit gilt
+    3:  {"abend": 18, "abend_sz": 19, "soc": 15},   # abend_sz = solange Sommerzeit gilt
     # …
-    12: {"abend": 16, "soc": 30},
+    12: {"abend": 16, "soc": 15},
 }
 LADESTROM = "0.1"         # Ladestrom von Slot 1 in A
+ODSOC_STEUERN = False     # Entladegrenze steuern (erst nach Prüfung mit "grenzen")
+ODSOC_CID = 158           # CID des Overdischarge-SOC
+ODSOC_NORMAL = None       # Entladegrenze außerhalb des Winters, z. B. 15
 PRUEF_ENDE = 6            # letzte Prüfung 06:00–06:59
 AUS_BEGINN = 7            # ab hier TOU aus
 LETZTE_AUS_SICHERUNG = 10
