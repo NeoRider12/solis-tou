@@ -8,18 +8,28 @@ Steuert den „Time of Use“-Schalter (TOU) eines Solis RAI-3K-48ES-5G über di
 
 ## Prinzip
 
-Im Wechselrichter ist ein **Ladeslot mit 0,1 A** eingestellt. Ist TOU an, lädt der Wechselrichter in dieser Zeit minimal, und die Pylontech-BMS gehen schlafen. Das Skript schaltet TOU nachts nur ein, wenn der SOC unter die Schwelle der Saison fällt. Morgens schaltet es TOU wieder aus.
+Im Wechselrichter ist ein **Ladeslot mit 0,1 A** eingestellt. Ist TOU an, lädt der Wechselrichter in dieser Zeit minimal, und die Pylontech-BMS gehen schlafen. Das Skript prüft ab dem **Abendbeginn** stündlich den SOC und schaltet TOU ein, sobald er unter die Schwelle des Monats fällt. Morgens um 07:00 schaltet es TOU wieder aus.
 
-| | Winter (01.10.–15.03.) | Sommer (16.03.–30.09.) |
+**Monatsplan** (`MONATSPLAN` im Skript): Der Abendbeginn ist Sonnenuntergang −1 Std., jeweils der späteste Wert des Monats, auf die volle Stunde aufgerundet. So beginnt der Akkuschlaf nie, solange die Sonne noch laden könnte – **die Sonne hat Vorrang**. Berechnet für Norddeutschland (ca. 52° N), für andere Orte anpassen.
+
+| Monat | Abendbeginn = Start Ladeslot 1 | TOU an bei |
 |---|---|---|
-| SOC-Prüfung, stündlich | 18:00–06:59 | 20:00–06:59 |
-| TOU an bei | **SOC ≤ 30 %** | **SOC ≤ 15 %** |
-| Ladeslot 1 | 18:00–07:00, 0,1 A | 20:00–07:00, 0,1 A |
-| TOU aus | ab 07:00, Sicherungen bis 10 Uhr | ab 07:00, Sicherungen bis 10 Uhr |
+| Januar | 17:00 | SOC ≤ 30 % |
+| Februar | 18:00 | SOC ≤ 30 % |
+| März | 18:00, ab Sommerzeit 19:00 | SOC ≤ 25 % |
+| April | 20:00 | SOC ≤ 20 % |
+| Mai–August | 21:00 | SOC ≤ 15 % |
+| September | 20:00 | SOC ≤ 20 % |
+| Oktober | 19:00, ab Winterzeit 17:00 | SOC ≤ 25 % |
+| November | 17:00 | SOC ≤ 30 % |
+| Dezember | 16:00 | SOC ≤ 30 % |
+
+Ladeslot 1 läuft immer vom Abendbeginn bis **07:00** mit **0,1 A**. TOU aus ab 07:00, Aus-Sicherungen bis 10 Uhr.
 
 - In der Prüfphase wird **nur eingeschaltet, nie ausgeschaltet**.
-- **Saisonwechsel:** Morgens prüft das Skript, ob Ladeslot 1 zur kommenden Nacht passt. Am 16.03. und am 01.10. setzt es ihn automatisch auf das neue Profil. Die Entladezeiten und die Slots 2 und 3 bleiben dabei unverändert.
-- Eine Nacht zählt zum Tag, an dem sie beginnt. Die Nacht vom 15. auf den 16. März ist also noch eine Winternacht.
+- **Ladeslot nachführen:** Morgens prüft das Skript, ob Ladeslot 1 zur kommenden Nacht passt, und setzt ihn bei Bedarf neu – nur bei einem neuen Abendbeginn und bei der Zeitumstellung, also ca. 8× im Jahr. Die SOC-Schwelle wird nie geschrieben, sie gilt nur im Skript. Entladezeiten und die Slots 2 und 3 bleiben unverändert.
+- **Zeitumstellung:** erkennt das Skript selbst. Der Wechselrichter muss sich ebenfalls umstellen (Solis-App: *Daylight Saving* automatisch), weil die Slot-Zeiten in seiner Uhrzeit gelten.
+- Eine Nacht zählt zum Tag, an dem sie beginnt. Die Nacht vom 31.01. auf den 01.02. gilt also noch als Januarnacht.
 
 ## Aufbau: öffentlich steuern, privat protokollieren
 
@@ -34,7 +44,7 @@ Zugangsdaten stehen nie im Code, sondern nur in den **Secrets** dieses Repos. Se
 
 | Datei | Zweck |
 |---|---|
-| `solis_tou.py` | Das Skript (status / auto / on / off / sommer / winter / protokoll) |
+| `solis_tou.py` | Das Skript (status / auto / on / off / ladeslot / protokoll) |
 | `requirements.txt` | Python-Abhängigkeit (`requests`) |
 | `.github/workflows/solis-tou.yml` | externer Start (cron-job.org), manueller Start, Protokoll-Speicherung |
 | `ZEITPLAN.md` | Tabelle aller Läufe und Schaltzeiten |
@@ -56,15 +66,15 @@ Zugangsdaten stehen nie im Code, sondern nur in den **Secrets** dieses Repos. Se
 
    Heißt das Protokoll-Repo anders, lege unter *Variables* die Variable `PROTOKOLL_REPO` an (z. B. `meinname/anderer-name`).
 5. **Manuell starten** unter *Actions → Solis Time of Use → Run workflow*:
-   - `status` zeigt Saison, Speichermodus, SOC, Ladeslots und die aktuelle Entscheidung.
+   - `status` zeigt Plan, Speichermodus, SOC, Ladeslots und die aktuelle Entscheidung.
    - `auto` führt den normalen Lauf aus. Mit Dry-Run siehst du nur, was geschaltet würde.
    - `on` / `off` schalten TOU sofort.
-   - `sommer` / `winter` setzen Ladeslot 1 sofort auf das jeweilige Saisonprofil.
+   - `ladeslot` setzt Ladeslot 1 sofort auf den Plan von heute Abend.
    - `protokoll` erzeugt `PROTOKOLL.md` im privaten Repo neu und zeigt die Tabelle im Log an.
 6. **Erster Test und Ladeslot setzen:**
    - `status` starten und prüfen: Der Speichermodus (CID 636) sollte **1** (TOU aus) bzw. **3** (TOU an) zeigen. Steht dort etwas anderes, ist dein Gerät anders belegt – dann **nicht** scharf schalten, sondern erst die Bits prüfen.
    - `auto` mit Dry-Run starten und die Entscheidung im Log ansehen.
-   - Einmal `winter` bzw. `sommer` (je nach aktueller Saison) **ohne** Dry-Run starten. Damit steht Ladeslot 1 sicher auf **0,1 A** und der richtigen Zeit. Wichtig, falls dort vorher ein höherer Ladestrom eingestellt war: Sonst lädt der Wechselrichter nachts mit diesem Strom aus dem Netz, sobald TOU angeht.
+   - Einmal `ladeslot` **ohne** Dry-Run starten. Damit steht Ladeslot 1 sicher auf **0,1 A** und der richtigen Zeit. Wichtig, falls dort vorher ein höherer Ladestrom eingestellt war: Sonst lädt der Wechselrichter nachts mit diesem Strom aus dem Netz, sobald TOU angeht.
    - Danach in der Solis-App kontrollieren, dass Slot 1 wirklich 0,1 A zeigt (die API liest 0,1 A als `0`).
 
 7. **cron-job.org einrichten** (nächster Abschnitt). Ohne diesen Schritt läuft nichts automatisch.
@@ -85,20 +95,20 @@ GitHubs eigener Zeitplan (`schedule`) startet nur „nach bestem Bemühen“: of
 | Feld | Wert |
 |---|---|
 | URL | `https://api.github.com/repos/<dein-name>/<dieses-repo>/actions/workflows/solis-tou.yml/dispatches` |
-| Zeitplan | Benutzerdefiniert: Minute **5**, Stunden **18–23 und 0–10**, jeden Tag |
+| Zeitplan | Benutzerdefiniert: Minute **5**, Stunden **16–23 und 0–10**, jeden Tag |
 | Zeitzone | **Europe/Berlin** (dann gibt es kein Sommer-/Winterzeit-Problem) |
 | Methode (Erweitert) | **POST** |
 | Header | `Authorization: Bearer <Token>` · `Accept: application/vnd.github+json` · `X-GitHub-Api-Version: 2022-11-28` · `Content-Type: application/json` |
 | Body | `{"ref":"main","inputs":{"command":"extern"}}` |
 | Benachrichtigung | bei Fehlschlag per E-Mail |
 
-Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der Läufe heißt er dann *„Extern (cron-job.org)“*, manuelle Läufe heißen *„Manuell: …“*. Die Stunden 18–10 passen für beide Saisons: Im Sommer sind die Läufe um 18 und 19 Uhr nur Aus-Sicherungen.
+Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der Läufe heißt er dann *„Extern (cron-job.org)“*, manuelle Läufe heißen *„Manuell: …“*. Die Stunden 16–10 decken den frühesten Abendbeginn (Dezember, 16:00) ab. Läufe vor dem Abendbeginn des Monats sind nur Aus-Sicherungen. Wird ein Abendbeginn im `MONATSPLAN` früher als 16 Uhr gelegt, den Job erweitern.
 
 **Ohne Reserve:** Fällt cron-job.org aus, läuft nichts. Deshalb die Fehler-Benachrichtigung dort einschalten. Notfalls von Hand starten (*Run workflow* → `auto` ohne Dry-Run). Bleibt TOU morgens versehentlich an, passiert tagsüber nichts (siehe *Sicherheit*).
 
-**Was kann jemand mit diesem Token?** Nur Läufe dieses Repos starten, abbrechen, löschen und deren Logs lesen – keinen Code ändern, keine Secrets lesen. Starten kann er auch `on`/`off`/`sommer`/`winter`, also nur die fest im Skript hinterlegten, sicheren Aktionen (schlimmstenfalls schlafen die Akkus eine Nacht nicht). Bei Verdacht: Token in GitHub löschen, neu erstellen, bei cron-job.org tauschen.
+**Was kann jemand mit diesem Token?** Nur Läufe dieses Repos starten, abbrechen, löschen und deren Logs lesen – keinen Code ändern, keine Secrets lesen. Starten kann er auch `on`/`off`/`ladeslot`, also nur die fest im Skript hinterlegten, sicheren Aktionen (schlimmstenfalls schlafen die Akkus eine Nacht nicht). Bei Verdacht: Token in GitHub löschen, neu erstellen, bei cron-job.org tauschen.
 
-**Actions-Minuten:** Öffentlich kostenlos. Im privaten Repo ca. 17 Läufe/Tag ≈ 530 min/Monat (frei sind 2.000).
+**Actions-Minuten:** Öffentlich kostenlos. Im privaten Repo ca. 19 Läufe/Tag ≈ 590 min/Monat (frei sind 2.000).
 
 ## Was öffentlich sichtbar ist
 
@@ -111,19 +121,21 @@ Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der 
 ## Einstellungen (oben in `solis_tou.py`)
 
 ```python
-SAISONS = {
-    "winter": {"beginn": (10, 1), "soc": 30, "pruef_beginn": 18,
-               "ladezeit": "18:00-07:00", "strom": "0.1"},
-    "sommer": {"beginn": (3, 16), "soc": 15, "pruef_beginn": 20,
-               "ladezeit": "20:00-07:00", "strom": "0.1"},
+MONATSPLAN = {
+    1:  {"abend": 17, "soc": 30},
+    # …
+    3:  {"abend": 18, "abend_sz": 19, "soc": 25},   # abend_sz = solange Sommerzeit gilt
+    # …
+    12: {"abend": 16, "soc": 30},
 }
+LADESTROM = "0.1"         # Ladestrom von Slot 1 in A
 PRUEF_ENDE = 6            # letzte Prüfung 06:00–06:59
 AUS_BEGINN = 7            # ab hier TOU aus
 LETZTE_AUS_SICHERUNG = 10
 LADESLOT_ABGLEICH = True  # False = Ladeslot nie automatisch ändern
 ```
 
-Wenn du `pruef_beginn` änderst, prüf auch die Stunden im cron-job.org-Job. Die Läufe müssen die neue Uhrzeit abdecken.
+`soc` kannst du jederzeit ändern, das kostet keine Schreibvorgänge. Legst du einen `abend` früher als 16 Uhr, erweitere den cron-job.org-Job, damit die Läufe die neue Uhrzeit abdecken.
 
 ## Protokoll
 
@@ -159,7 +171,7 @@ So funktioniert es:
 
 ## Actions-Minuten
 
-In **öffentlichen** Repos sind die Minuten auf Standard-Runnern kostenlos. Im privaten Repo: ca. 17 Läufe pro Tag, jeder zählt als volle Minute → ca. 530 min/Monat, bei gestörter Solis-Cloud bis ca. 1.000 min (frei sind 2.000).
+In **öffentlichen** Repos sind die Minuten auf Standard-Runnern kostenlos. Im privaten Repo: ca. 19 Läufe pro Tag, jeder zählt als volle Minute → ca. 590 min/Monat, bei gestörter Solis-Cloud bis ca. 1.100 min (frei sind 2.000).
 
 Das Skript bricht nach spätestens 80 s ab, die Notbremse von GitHub greift nach 3 min.
 

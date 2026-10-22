@@ -1,33 +1,33 @@
 #!/usr/bin/env python3
 """
 solis_tou.py – Akkus des Solis RAI-3K-48ES-5G nachts gezielt "schlafen legen"
-über den Time-of-Use-Schalter (SolisCloud-API). Ganzjährig mit zwei Saisons.
+über den Time-of-Use-Schalter (SolisCloud-API). Ganzjährig nach Monatsplan.
 
 Prinzip
   * Im Wechselrichter ist ein TOU-Ladeslot mit 0,1 A eingestellt. Ist TOU AN,
     lädt der WR in dieser Zeit minimal → die Pylontech-BMS gehen schlafen.
-  * Abends/nachts (Prüfphase): stündlich SOC prüfen. Ist SOC <= Schwelle der
-    Saison, wird TOU EINgeschaltet. In der Prüfphase wird TOU NIE ausgeschaltet.
+  * Abends/nachts (Prüfphase, ab dem Abendbeginn des Monats): stündlich SOC
+    prüfen. Ist SOC <= Schwelle des Monats, wird TOU EINgeschaltet. In der
+    Prüfphase wird TOU NIE ausgeschaltet.
   * ab 07:00: TOU wird AUSgeschaltet (mehrere Läufe bis Vormittag als Sicherung).
-  * Saisonwechsel: Morgens wird der Ladeslot 1 (Zeit + 0,1 A) automatisch auf
-    das Profil der kommenden Nacht gesetzt, falls die Zeit abweicht oder der
-    Ladestrom deutlich zu hoch ist.
+  * Morgens wird Ladeslot 1 (Abendbeginn–07:00, 0,1 A) automatisch auf den Plan
+    der kommenden Nacht gesetzt, falls die Zeit abweicht oder der Ladestrom
+    deutlich zu hoch ist. Das passiert nur bei Monatswechseln mit neuem
+    Abendbeginn und bei der Zeitumstellung (ca. 8× im Jahr).
 
-Saisons (siehe SAISONS)
-  Winter 01.10.–15.03.: Prüfung 18–06 Uhr, SOC <= 30 %, Ladeslot 18:00–07:00
-  Sommer 16.03.–30.09.: Prüfung 20–06 Uhr, SOC <= 15 %, Ladeslot 20:00–07:00
+Monatsplan (siehe MONATSPLAN): Abendbeginn = Sonnenuntergang −1 Std., auf die
+volle Stunde aufgerundet (die Sonne hat Vorrang). TOU aus immer ab 07:00.
 
 Schalten: pro Lauf ein Schreibbefehl je Register. Danach Kontrolle durch
 Zurücklesen. Nicht bestätigt → Warnung; der nächste Lauf prüft erneut.
 Findet die letzte Aus-Sicherung am Vormittag TOU noch AN → Fehler + E-Mail.
 
 Aufruf
-  python3 solis_tou.py status            # Saison, Modus, SOC, Ladeslots, Entscheidung
+  python3 solis_tou.py status            # Plan, Modus, SOC, Ladeslots, Entscheidung
   python3 solis_tou.py auto [--dry-run]  # automatischer Lauf (GitHub-Zeitplan)
   python3 solis_tou.py on   [--dry-run]  # TOU sofort einschalten
   python3 solis_tou.py off  [--dry-run]  # TOU sofort ausschalten
-  python3 solis_tou.py sommer [--dry-run]  # Ladeslot 1 sofort auf Sommerprofil
-  python3 solis_tou.py winter [--dry-run]  # Ladeslot 1 sofort auf Winterprofil
+  python3 solis_tou.py ladeslot [--dry-run]  # Ladeslot 1 sofort auf den heutigen Plan
   python3 solis_tou.py protokoll         # PROTOKOLL.md neu erzeugen und anzeigen
 
 Protokoll (optional): Ist die Umgebungsvariable PROTOKOLL_DIR gesetzt, wird jede
@@ -53,6 +53,7 @@ import os
 import sys
 import time
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from email.utils import formatdate
 from pathlib import Path
 
@@ -60,18 +61,35 @@ import requests
 
 # ============================ EINSTELLUNGEN ================================
 
-SAISONS = {
-    # beginn: (Monat, Tag), an dem die erste Nacht dieser Saison beginnt
-    "winter": {"beginn": (10, 1), "soc": 30, "pruef_beginn": 18,
-               "ladezeit": "18:00-07:00", "strom": "0.1"},
-    "sommer": {"beginn": (3, 16), "soc": 15, "pruef_beginn": 20,
-               "ladezeit": "20:00-07:00", "strom": "0.1"},
+# Monatsplan – gilt für die Nacht, die an einem Tag dieses Monats beginnt.
+#   abend    = Abendbeginn (volle Stunde): Start von Ladeslot 1 UND Beginn der SOC-Prüfung
+#   abend_sz = abweichender Abendbeginn, solange Sommerzeit gilt (nur März und Oktober nötig;
+#              die Zeitumstellung erkennt das Skript selbst)
+#   soc      = TOU an, wenn SOC <= diesem Wert (kostet keine Schreibvorgänge, frei änderbar)
+# Abendbeginn = Sonnenuntergang −1 Std., spätester Wert des Monats, auf volle Stunde aufgerundet.
+# ACHTUNG: Wird ein Abendbeginn früher als 16 Uhr gelegt, den cron-job.org-Job erweitern
+#          (er startet erst ab 16:05).
+MONATSPLAN = {
+    1:  {"abend": 17, "soc": 30},
+    2:  {"abend": 18, "soc": 30},
+    3:  {"abend": 18, "abend_sz": 19, "soc": 25},
+    4:  {"abend": 20, "soc": 20},
+    5:  {"abend": 21, "soc": 15},
+    6:  {"abend": 21, "soc": 15},
+    7:  {"abend": 21, "soc": 15},
+    8:  {"abend": 21, "soc": 15},
+    9:  {"abend": 20, "soc": 20},
+    10: {"abend": 17, "abend_sz": 19, "soc": 25},
+    11: {"abend": 17, "soc": 30},
+    12: {"abend": 16, "soc": 30},
 }
+LADESTROM = "0.1"         # Ladestrom von Slot 1 in A (lässt die Pylontech-BMS schlafen)
+ZEITZONE = ZoneInfo("Europe/Berlin")
 
-PRUEF_ENDE = 6            # letzte Prüfung in der Stunde 06:00–06:59 (beide Saisons)
+PRUEF_ENDE = 6            # letzte Prüfung in der Stunde 06:00–06:59
 AUS_BEGINN = 7            # ab 07:00 Uhr wird TOU ausgeschaltet (bis zur nächsten Prüfphase)
 LETZTE_AUS_SICHERUNG = 10 # ab diesem Lauf: TOU noch AN → Fehler + E-Mail
-LADESLOT_ABGLEICH = True  # morgens Ladeslot 1 automatisch auf das Saisonprofil setzen
+LADESLOT_ABGLEICH = True  # morgens Ladeslot 1 automatisch auf den Plan der kommenden Nacht setzen
 
 # Nach dem Schreiben zurücklesen und bestätigen? (False = nur schreiben)
 RUECKLESEN = True
@@ -154,7 +172,7 @@ def protokolliere(ereignis: str, soc: float | None = None, info: str = "") -> No
         w.writerow({
             "zeit": now.strftime("%Y-%m-%d %H:%M"),
             "nacht": nacht_datum(now).isoformat(),
-            "saison": nacht_saison(now),
+            "saison": plan(nacht_datum(now))["ladezeit"],   # Spalte heißt historisch "saison"
             "ereignis": ereignis,
             "soc": "" if soc is None else f"{soc:.0f}",
             "quelle": LOG["quelle"],
@@ -174,7 +192,7 @@ SPAET_AUS = "08:00"         # Ausschalten ab dieser Uhrzeit gilt als auffällig 
 
 def werte_nacht_aus(d: date, evs: list[dict], vorbei: bool = True) -> dict:
     """Fasst die Ereignisse einer Nacht zusammen. vorbei=False für die laufende Nacht."""
-    name = evs[0]["saison"] or saison(d)
+    ladezeit = ladezeit_aus_protokoll(evs[0]["saison"], d)
     an = next((e for e in evs if e["ereignis"] == "TOU_AN"), None)
     aus = next((e for e in evs if e["ereignis"] == "TOU_AUS"), None)
     morgen = next((e for e in evs if e["ereignis"] == "MORGEN"), None)
@@ -198,7 +216,7 @@ def werte_nacht_aus(d: date, evs: list[dict], vorbei: bool = True) -> dict:
         pass                     # laufende Nacht: Dauer steht erst morgens fest
     elif an:
         # wirksame Schlafzeit = Überschneidung von "TOU an" und Ladeslot
-        von_s, bis_s = SAISONS.get(name, SAISONS[saison(d)])["ladezeit"].split("-")
+        von_s, bis_s = ladezeit.split("-")
         slot_von = datetime.combine(d, datetime.strptime(von_s, "%H:%M").time())
         slot_bis = datetime.combine(d + timedelta(days=1), datetime.strptime(bis_s, "%H:%M").time())
         t_an = datetime.strptime(an["zeit"], "%Y-%m-%d %H:%M")
@@ -419,46 +437,52 @@ def nacht_datum(now: datetime) -> date:
     return (now - timedelta(days=1)).date() if now.hour < 12 else now.date()
 
 
-def saison(d: date) -> str:
-    """Name der Saison, zu der der Tag d gehört."""
-    md = (d.month, d.day)
-    nach_beginn = sorted(SAISONS.items(), key=lambda kv: kv[1]["beginn"])
-    aktuell = nach_beginn[-1][0]          # vor dem ersten Beginn im Jahr: letzte Saison des Vorjahres
-    for name, cfg in nach_beginn:
-        if md >= cfg["beginn"]:
-            aktuell = name
-    return aktuell
+def plan(d: date) -> dict:
+    """Plan für die Nacht, die am Tag d beginnt: Abendbeginn, SOC-Schwelle, Ladezeit."""
+    m = MONATSPLAN[d.month]
+    sommerzeit = bool(datetime(d.year, d.month, d.day, 18, tzinfo=ZEITZONE).dst())
+    abend = m["abend_sz"] if sommerzeit and "abend_sz" in m else m["abend"]
+    return {"abend": abend, "soc": m["soc"],
+            "ladezeit": f"{abend:02d}:00-{AUS_BEGINN:02d}:00"}
 
 
-def nacht_saison(now: datetime) -> str:
-    return saison(nacht_datum(now))
+def plan_text(d: date) -> str:
+    p = plan(d)
+    return f"ab {p['abend']}:00, SOC <= {p['soc']} %"
+
+
+# Ältere Protokollzeilen enthalten noch den Saisonnamen statt der Ladezeit
+_ALTE_SAISONS = {"winter": "18:00-07:00", "sommer": "20:00-07:00"}
+
+
+def ladezeit_aus_protokoll(wert: str, d: date) -> str:
+    if "-" in (wert or ""):
+        return wert
+    return _ALTE_SAISONS.get(wert, plan(d)["ladezeit"])
 
 
 def phase(now: datetime) -> str:
-    cfg = SAISONS[nacht_saison(now)]
     h = now.hour
-    if h >= cfg["pruef_beginn"] or h <= PRUEF_ENDE:
+    if h >= plan(nacht_datum(now))["abend"] or h <= PRUEF_ENDE:
         return "pruefen"
     return "aus"
 
 
 def entscheide(now: datetime, tou_an: bool | None, soc: float | None) -> tuple[bool | None, str]:
     """(Soll-Zustand oder None = nichts tun, Begründung)."""
-    name = nacht_saison(now)
-    cfg = SAISONS[name]
     if phase(now) == "aus":
-        heute = SAISONS[saison(now.date())]["pruef_beginn"]
+        heute = plan(now.date())["abend"]
         return False, f"Tagsüber (ab {AUS_BEGINN}:00 bis {heute}:00) → TOU AUS, Akkus laufen normal"
 
     # Prüfphase – hier wird NUR eingeschaltet, nie ausgeschaltet
-    schwelle = cfg["soc"]
+    schwelle = plan(nacht_datum(now))["soc"]
     if tou_an:
         return None, "TOU ist bereits AN (Akkus schlafen) → bleibt bis morgens so"
     if soc is None:
         return None, "SOC nicht lesbar → keine Änderung"
     if soc <= schwelle:
-        return True, f"SOC {soc:.0f} % <= {schwelle} % ({name}) → Akkus schlafen legen (TOU AN)"
-    return None, f"SOC {soc:.0f} % > {schwelle} % ({name}) → Akkus laufen weiter"
+        return True, f"SOC {soc:.0f} % <= {schwelle} % → Akkus schlafen legen (TOU AN)"
+    return None, f"SOC {soc:.0f} % > {schwelle} % → Akkus laufen weiter"
 
 
 def tou_bit(raw: str) -> bool:
@@ -505,11 +529,11 @@ def schalte(enable: bool, dry_run: bool) -> bool:
     return False
 
 
-def setze_ladeslot(name: str, dry_run: bool, alt: str | None = None) -> bool:
-    """Setzt Ladestrom und Ladezeit von Slot 1 (CID 103) auf das Profil der Saison.
+def setze_ladeslot(d: date, dry_run: bool, alt: str | None = None) -> bool:
+    """Setzt Ladestrom und Ladezeit von Slot 1 (CID 103) auf den Plan der Nacht ab Tag d.
     Format: Ladestrom,Entladestrom,Ladezeit,Entladezeit (× 3 Slots).
     Alles andere (Entladung, Slots 2 und 3) bleibt unverändert."""
-    ziel = {"zeit": SAISONS[name]["ladezeit"], "strom": SAISONS[name]["strom"]}
+    ziel = {"zeit": plan(d)["ladezeit"], "strom": LADESTROM}
     if alt is None:
         alt = read_cid(CID_CHARGE_DISCHARGE)
     teile = alt.split(",")
@@ -519,7 +543,7 @@ def setze_ladeslot(name: str, dry_run: bool, alt: str | None = None) -> bool:
     neu_teile[0] = ziel["strom"]
     neu_teile[2] = ziel["zeit"]
     neu = ",".join(neu_teile)
-    print(f"Ladeslot 1 → Profil '{name}' ({ziel['strom']} A, {ziel['zeit']})")
+    print(f"Ladeslot 1 → Plan ab {d:%d.%m.} ({ziel['strom']} A, {ziel['zeit']})")
     print(f"Ladeslots alt: {alt}")
     print(f"Ladeslots neu: {neu}")
     if neu == alt:
@@ -530,7 +554,7 @@ def setze_ladeslot(name: str, dry_run: bool, alt: str | None = None) -> bool:
         return True
     write_cid(CID_CHARGE_DISCHARGE, neu, alt)
     print("Schreibbefehl von der Cloud angenommen.")
-    protokolliere("LADESLOT", None, f"Profil {name}: {ziel['zeit']}, {ziel['strom']} A")
+    protokolliere("LADESLOT", None, f"{ziel['zeit']}, {ziel['strom']} A")
     if restzeit() < 25:
         print("Kein Zeitbudget mehr für die Kontrolle – der nächste Lauf prüft erneut.")
         return True
@@ -559,34 +583,35 @@ def strom_passt(gelesen: str, ziel: str) -> bool:
 
 
 def ladeslot_abgleich(now: datetime, dry_run: bool) -> None:
-    """Morgens: Ladeslot 1 auf das Profil der kommenden Nacht setzen, falls die Zeit
+    """Morgens: Ladeslot 1 auf den Plan der kommenden Nacht setzen, falls die Zeit
     abweicht oder der Ladestrom deutlich zu hoch ist (0,1 A liest die API als 0)."""
-    name = saison(now.date())
+    heute = now.date()
+    ziel = plan(heute)["ladezeit"]
     if restzeit() < 35:
         print("Ladeslot-Abgleich übersprungen (Zeitbudget) – nächster Lauf.")
         return
     alt = read_cid(CID_CHARGE_DISCHARGE)
     teile = alt.split(",")
-    if len(teile) == 12 and teile[2] == SAISONS[name]["ladezeit"]:
-        if strom_passt(teile[0], SAISONS[name]["strom"]):
-            print(f"Ladeslot 1 passt zur Saison '{name}' ({teile[2]}).")
+    if len(teile) == 12 and teile[2] == ziel:
+        if strom_passt(teile[0], LADESTROM):
+            print(f"Ladeslot 1 passt zum Plan ({teile[2]}).")
             return
         print(f"Ladeslot 1: Zeit passt, aber Ladestrom '{teile[0]}' A statt "
-              f"{SAISONS[name]['strom']} A – wird korrigiert.")
+              f"{LADESTROM} A – wird korrigiert.")
     else:
-        print(f"Saisonwechsel: Ladeslot 1 weicht vom Profil '{name}' ab.")
-    setze_ladeslot(name, dry_run, alt)
+        print(f"Neuer Abendbeginn: Ladeslot 1 ({teile[2] if len(teile) == 12 else '?'}) → {ziel}.")
+    setze_ladeslot(heute, dry_run, alt)
 
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Solis TOU / Akku-Schlaf per SolisCloud-API")
-    p.add_argument("command", choices=["status", "auto", "on", "off", "sommer", "winter", "protokoll"])
+    p.add_argument("command", choices=["status", "auto", "on", "off", "ladeslot", "protokoll"])
     p.add_argument("--dry-run", action="store_true", help="nur anzeigen, nichts schreiben")
     a = p.parse_args()
 
     now = datetime.now()
-    name = nacht_saison(now)
-    print(f"--- {now:%Y-%m-%d %H:%M} · {a.command} · Nacht vom {nacht_datum(now):%d.%m.} · Saison {name} ---")
+    print(f"--- {now:%Y-%m-%d %H:%M} · {a.command} · Nacht vom {nacht_datum(now):%d.%m.} · "
+          f"Plan {plan_text(nacht_datum(now))} ---")
 
     if a.command == "protokoll":
         if not PROTOKOLL_AKTIV:
@@ -598,7 +623,7 @@ def main() -> int:
     LOG["aktiv"] = not a.dry_run and a.command != "status"
     LOG["quelle"] = "auto" if a.command == "auto" else "manuell"
     try:
-        return _ablauf(a, now, name)
+        return _ablauf(a, now)
     except Fehler as e:
         if a.command == "auto" and phase(now) == "aus" and tou_sicher_aus():
             # Tagsüber, TOU ist laut Protokoll bereits bestätigt aus → kein Grund für Alarm
@@ -614,9 +639,9 @@ def main() -> int:
             print("Protokoll aktualisiert.")
 
 
-def _ablauf(a, now: datetime, name: str) -> int:
-    if a.command in SAISONS:
-        return 0 if setze_ladeslot(a.command, a.dry_run) else 1
+def _ablauf(a, now: datetime) -> int:
+    if a.command == "ladeslot":
+        return 0 if setze_ladeslot(now.date(), a.dry_run) else 1
 
     if a.command in ("on", "off"):
         return 0 if schalte(a.command == "on", a.dry_run) else 1
@@ -647,9 +672,11 @@ def _ablauf(a, now: datetime, name: str) -> int:
     print(f"Entscheidung: {grund}")
 
     if a.command == "status":
-        cfg = SAISONS[name]
-        print(f"Saisonprofil {name}: Prüfung {cfg['pruef_beginn']}–{PRUEF_ENDE}:59 Uhr, "
-              f"SOC <= {cfg['soc']} %, Ladeslot {cfg['ladezeit']} mit {cfg['strom']} A")
+        n, h = plan(nacht_datum(now)), plan(now.date())
+        print(f"Plan dieser Nacht: Prüfung {n['abend']}:00–{PRUEF_ENDE}:59 Uhr, SOC <= {n['soc']} %, "
+              f"Ladeslot {n['ladezeit']} mit {LADESTROM} A")
+        if h != n:
+            print(f"Plan ab heute Abend: {plan_text(now.date())}, Ladeslot {h['ladezeit']}")
         try:
             print(f"Lade-/Entladezeiten (CID {CID_CHARGE_DISCHARGE}): {read_cid(CID_CHARGE_DISCHARGE)}")
         except Fehler as e:

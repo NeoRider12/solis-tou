@@ -15,7 +15,7 @@ on:
       command:
         description: "Befehl"
         type: choice
-        options: ["status", "auto", "on", "off", "sommer", "winter", "protokoll", "extern"]   # in Anführungszeichen! Sonst macht YAML aus on/off true/false
+        options: ["status", "auto", "on", "off", "ladeslot", "protokoll", "extern"]   # in Anführungszeichen! Sonst macht YAML aus on/off true/false
         default: "status"
       dry_run:
         description: "Nur anzeigen, nichts schreiben (Dry-Run)"
