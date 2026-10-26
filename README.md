@@ -96,7 +96,7 @@ GitHubs eigener Zeitplan (`schedule`) startet nur „nach bestem Bemühen“: of
 | Feld | Wert |
 |---|---|
 | URL | `https://api.github.com/repos/<dein-name>/<dieses-repo>/actions/workflows/solis-tou.yml/dispatches` |
-| Zeitplan | Benutzerdefiniert: Minute **5**, Stunden **16–23 und 0–10**, jeden Tag |
+| Zeitplan | Benutzerdefiniert: Minute **15**, Stunden **16–23 und 0–10**, jeden Tag |
 | Zeitzone | **Europe/Berlin** (dann gibt es kein Sommer-/Winterzeit-Problem) |
 | Methode (Erweitert) | **POST** |
 | Header | `Authorization: Bearer <Token>` · `Accept: application/vnd.github+json` · `X-GitHub-Api-Version: 2022-11-28` · `Content-Type: application/json` |
@@ -177,11 +177,12 @@ So funktioniert es:
 - Beim Ladeslot ändert es nur Ladestrom und Ladezeit von Slot 1 (CID 103).
 - **Pro Lauf gibt es höchstens einen Schreibbefehl je Register.** Danach wird zurückgelesen. Ist der neue Wert nicht bestätigt, gibt es eine gelbe Warnung, und der nächste Lauf prüft erneut.
 - Der Ladestrom 0,1 A wird von der API als `0` gelesen, intern arbeitet der Wechselrichter aber mit 0,1 A. Beim morgendlichen Abgleich gilt deshalb ein gelesener Strom bis 0,1 A als passend; ein deutlich höherer Wert (z. B. 50 A) wird erkannt und auf 0,1 A korrigiert.
+- **Geduld bei Cloud-Störungen:** Jeder API-Aufruf wird bis zu dreimal versucht, mit 10 und 30 s Pause dazwischen. Die SolisCloud hat erfahrungsgemäß kurze Aussetzer, gehäuft um Mitternacht Pekinger Zeit (17:00 bzw. 18:00 bei uns) – deshalb starten die Läufe zur Minute 15.
 - **Fehler mit E-Mail** gibt es in diesen Fällen:
-  - Die API lehnt einen Befehl ab.
-  - Der SOC ist nachts nicht lesbar.
-  - Die letzte Aus-Sicherung am Vormittag findet TOU noch AN vor.
-- **Kein Alarm bei harmlosen Cloud-Aussetzern:** Ist TOU laut Protokoll schon bestätigt AUS, erzeugt ein Cloud-Fehler tagsüber nur eine gelbe Warnung und einen Hinweis im Protokoll, aber keine E-Mail.
+  - Die API lehnt einen Schreibbefehl ab.
+  - Die Cloud ist **zweimal in Folge** nicht erreichbar oder der SOC zweimal in Folge nicht lesbar.
+  - Die letzte Aus-Sicherung am Vormittag findet TOU noch AN vor (oder kann es wegen der Cloud nicht prüfen, obwohl TOU nicht bestätigt aus ist).
+- **Kein Alarm bei einzelnen Cloud-Aussetzern:** Ein einzelner gescheiterter Lauf ergibt nur eine gelbe Warnung und einen Hinweis im Protokoll – der nächste Lauf holt es nach. Ohne Protokoll-Repo wird jeder Aussetzer gemeldet (dann fehlt das Gedächtnis).
 - Fällt das Ausschalten am Morgen komplett aus, passiert tagsüber nichts: Außerhalb des Ladeslots arbeitet der Wechselrichter trotz TOU normal im Self-Use.
 - Notfall: unter *Actions → Run workflow* `off` ohne Dry-Run wählen. Oder in der Solis-App TOU ausschalten.
 - **Forks und Pull Requests** fremder Leute bekommen keinen Zugriff auf deine Secrets, und der Workflow reagiert nicht auf Pull Requests.
@@ -190,6 +191,6 @@ So funktioniert es:
 
 In **öffentlichen** Repos sind die Minuten auf Standard-Runnern kostenlos. Im privaten Repo: ca. 19 Läufe pro Tag, jeder zählt als volle Minute → ca. 590 min/Monat, bei gestörter Solis-Cloud bis ca. 1.100 min (frei sind 2.000).
 
-Das Skript bricht nach spätestens 80 s ab, die Notbremse von GitHub greift nach 3 min.
+Das Skript bricht nach spätestens 150 s ab (normale Läufe brauchen 10–60 s, länger nur bei Cloud-Störungen), die Notbremse von GitHub greift nach 4 min.
 
 Den genauen Zeitplan aller Läufe findest du in `ZEITPLAN.md`.

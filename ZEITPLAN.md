@@ -1,22 +1,22 @@
 # Zeitplan der Läufe (Ortszeit Deutschland)
 
-Gestartet wird von cron-job.org: jeden Tag zur Minute 5, von **16:05 bis 10:05 Uhr**, ganzjährig gleich und direkt in deutscher Ortszeit. GitHub braucht danach meist nur wenige Sekunden bis zum Start.
+Gestartet wird von cron-job.org: jeden Tag zur Minute 15, von **16:15 bis 10:15 Uhr**, ganzjährig gleich und direkt in deutscher Ortszeit. GitHub braucht danach meist nur wenige Sekunden bis zum Start.
 
 Was ein Lauf tut, hängt vom **Abendbeginn** des Monats ab (siehe `MONATSPLAN` im Skript bzw. README):
 
 | Startzeit | Was passiert |
 |---|---|
-| 16:05 bis vor Abendbeginn | Aus-Sicherung (Tag – TOU bleibt aus) |
-| ab Abendbeginn (z. B. Dez 16:05, Juni 21:05) | Prüfung → ggf. **EIN** |
-| stündlich bis 05:05 | Prüfung → ggf. EIN |
-| 06:05 | letzte Prüfung → ggf. EIN |
-| 07:05 | **AUS** + Ladeslot-Abgleich |
-| 08:05, 09:05 | Aus-Sicherung |
-| 10:05 | letzte Aus-Sicherung, **Fehler-Mail, falls TOU noch AN** |
+| 16:15 bis vor Abendbeginn | Aus-Sicherung (Tag – TOU bleibt aus) |
+| ab Abendbeginn (z. B. Dez 16:15, Juni 21:15) | Prüfung → ggf. **EIN** |
+| stündlich bis 05:15 | Prüfung → ggf. EIN |
+| 06:15 | letzte Prüfung → ggf. EIN |
+| 07:15 | **AUS** + Ladeslot-Abgleich |
+| 08:15, 09:15 | Aus-Sicherung |
+| 10:15 | letzte Aus-Sicherung, **Fehler-Mail, falls TOU noch AN** |
 
 ## Wann der Ladeslot neu geschrieben wird
 
-Immer morgens um 07:05 für die kommende Nacht, aber nur, wenn sich der Abendbeginn ändert:
+Immer morgens um 07:15 für die kommende Nacht, aber nur, wenn sich der Abendbeginn ändert:
 
 | Datum | Ladeslot 1 |
 |---|---|
@@ -30,7 +30,7 @@ Immer morgens um 07:05 für die kommende Nacht, aber nur, wenn sich der Abendbeg
 | Ende Sommerzeit (letzter So. im Oktober) | 17:00–07:00 |
 | 01.12. | 16:00–07:00 |
 
-Dazu prüft jeder Morgenlauf, ob der Ladestrom noch 0,1 A beträgt. Klappt das Schreiben um 07:05 nicht, holen es die Läufe um 08:05–10:05 nach.
+Dazu prüft jeder Morgenlauf, ob der Ladestrom noch 0,1 A beträgt. Klappt das Schreiben um 07:15 nicht, holen es die Läufe um 08:15–10:15 nach.
 
 ## Legende
 

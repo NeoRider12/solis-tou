@@ -71,7 +71,7 @@ import requests
 #              fehlt der Eintrag, gilt ODSOC_NORMAL. Wird nur geschrieben, wenn sie sich ändert.
 # Abendbeginn = Sonnenuntergang −1 Std., spätester Wert des Monats, auf volle Stunde aufgerundet.
 # ACHTUNG: Wird ein Abendbeginn früher als 16 Uhr gelegt, den cron-job.org-Job erweitern
-#          (er startet erst ab 16:05).
+#          (er startet erst ab 16:15).
 MONATSPLAN = {
     1:  {"abend": 17, "soc": 30, "odsoc": 30},
     2:  {"abend": 18, "soc": 30, "odsoc": 30},
@@ -117,7 +117,9 @@ PROTOKOLL_TAGE = 60       # so viele Nächte zeigt die Detailtabelle in PROTOKOL
 HINWEISE_MAX = 15         # so viele Nächte mit Hinweisen werden höchstens aufgelistet
 MONATS_UEBERSICHT = 60    # so viele Monate zeigt die Monatsübersicht (CSV behält alles)
 
-MAX_LAUFZEIT = 80         # Sekunden: danach bricht das Skript ab (spart Actions-Minuten)
+MAX_LAUFZEIT = 150        # Sekunden: danach bricht das Skript ab (normale Läufe brauchen 10–60 s)
+WIEDERHOL_PAUSEN = (10, 30)  # Sekunden Pause vor dem 2. und 3. Versuch, wenn die Cloud hakt
+AUSSETZER_FENSTER = 75    # Minuten: zwei Cloud-Aussetzer innerhalb dieser Zeit = Fehler + E-Mail
 
 # ===========================================================================
 
@@ -143,6 +145,30 @@ BITS = {
 
 class Fehler(Exception):
     pass
+
+
+class CloudFehler(Fehler):
+    """Cloud nicht erreichbar / gestört (Timeout, 502 …) – meist vorübergehend."""
+
+
+CLOUD_PREFIX = "Cloud-Aussetzer"
+
+
+def aussetzer_kurz_zuvor(now: datetime) -> bool:
+    """True, wenn laut Protokoll schon der vorige Lauf (innerhalb AUSSETZER_FENSTER) an der
+    Cloud gescheitert ist. Ohne Protokoll lässt sich das nicht prüfen → True (lieber melden)."""
+    if not PROTOKOLL_AKTIV:
+        return True
+    for e in reversed(lies_ereignisse()):
+        try:
+            t = datetime.strptime(e["zeit"], "%Y-%m-%d %H:%M")
+        except ValueError:
+            continue
+        if now - t > timedelta(minutes=AUSSETZER_FENSTER):
+            return False
+        if e["ereignis"] in ("WARNUNG", "FEHLER") and e["info"].startswith(CLOUD_PREFIX):
+            return True
+    return False
 
 
 # ----------------------------- Protokoll -----------------------------------
@@ -412,9 +438,12 @@ def _post(endpoint: str, payload: dict) -> object:
             return js.get("data")
         except Exception as e:  # noqa: BLE001
             last_err = e
-            if attempt < 2 and restzeit() > 10:
-                time.sleep(3 * (attempt + 1))
-    raise Fehler(f"{endpoint} fehlgeschlagen: {last_err or 'Zeitlimit erreicht'}")
+            if attempt < 2:
+                pause = WIEDERHOL_PAUSEN[attempt]
+                if restzeit() < pause + 20:
+                    break
+                time.sleep(pause)
+    raise CloudFehler(f"{endpoint} fehlgeschlagen: {last_err or 'Zeitlimit erreicht'}")
 
 
 def read_cid(cid: int) -> str:
@@ -703,12 +732,26 @@ def main() -> int:
     LOG["quelle"] = "auto" if a.command == "auto" else "manuell"
     try:
         return _ablauf(a, now)
-    except Fehler as e:
-        if a.command == "auto" and phase(now) == "aus" and tou_sicher_aus():
+    except CloudFehler as e:
+        if a.command != "auto":
+            print(f"FEHLER: {e}")
+            return 1
+        if phase(now) == "aus" and tou_sicher_aus():
             # Tagsüber, TOU ist laut Protokoll bereits bestätigt aus → kein Grund für Alarm
             print(f"::warning::Cloud-Problem, aber TOU ist bereits bestätigt AUS: {e}")
-            protokolliere("WARNUNG", None, f"Cloud nicht erreichbar (TOU war schon aus): {e}")
+            protokolliere("WARNUNG", None, f"{CLOUD_PREFIX} (TOU war schon aus): {e}")
             return 0
+        letzte_sicherung = phase(now) == "aus" and now.hour >= LETZTE_AUS_SICHERUNG
+        if not letzte_sicherung and not aussetzer_kurz_zuvor(now):
+            # Einzelner Aussetzer: der nächste Lauf holt es nach → nur Warnung, keine E-Mail
+            print(f"::warning::Cloud-Aussetzer – der nächste Lauf versucht es erneut: {e}")
+            protokolliere("WARNUNG", None, f"{CLOUD_PREFIX}: {e}")
+            return 0
+        grund = "letzte Aus-Sicherung" if letzte_sicherung else "zweimal in Folge"
+        print(f"FEHLER ({grund}): {e}")
+        protokolliere("FEHLER", None, f"{CLOUD_PREFIX} ({grund}): {e}")
+        return 1
+    except Fehler as e:
         print(f"FEHLER: {e}")
         protokolliere("FEHLER", None, str(e))
         return 1
@@ -742,14 +785,17 @@ def _ablauf(a, now: datetime) -> int:
                                   for e in lies_ereignisse()))
 
     soc = None
+    soc_folgefehler = False
     if a.command == "status" or morgen_eintrag or (phase(now) == "pruefen" and not tou_an):
         try:
             soc, stand = read_soc()
             print(f"SOC: {soc:.0f} %" + (f" (Stand {stand})" if stand else ""))
         except Fehler as e:
-            print(f"WARNUNG – SOC nicht lesbar: {e}")
-            if phase(now) == "pruefen":
-                protokolliere("WARNUNG", None, "SOC nicht lesbar")
+            print(f"::warning::SOC nicht lesbar: {e}")
+            if phase(now) == "pruefen" and a.command == "auto":
+                soc_folgefehler = aussetzer_kurz_zuvor(now)
+                protokolliere("FEHLER" if soc_folgefehler else "WARNUNG", None,
+                              f"{CLOUD_PREFIX}: SOC nicht lesbar" + (" (zweimal in Folge)" if soc_folgefehler else ""))
     LOG["soc"] = soc
     if morgen_eintrag:
         protokolliere("MORGEN", soc, f"TOU war {'an' if tou_an else 'aus'}")
@@ -783,8 +829,8 @@ def _ablauf(a, now: datetime) -> int:
             print("FEHLER: Letzte Aus-Sicherung – TOU ist noch AN. Bitte in der App ausschalten!")
             protokolliere("FEHLER", None, "letzte Aus-Sicherung: TOU noch AN")
             rc = 1
-    elif soc is None and phase(now) == "pruefen" and not tou_an:
-        rc = 1   # SOC-Lesefehler sichtbar machen (roter Lauf + E-Mail)
+    elif soc_folgefehler:
+        rc = 1   # SOC zweimal in Folge nicht lesbar → roter Lauf + E-Mail
 
     if LADESLOT_ABGLEICH and phase(now) == "aus":
         try:

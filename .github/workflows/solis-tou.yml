@@ -39,7 +39,7 @@ env:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 3          # Notbremse: hängt etwas, bricht GitHub nach 3 Min. ab
+    timeout-minutes: 4          # Notbremse: hängt etwas, bricht GitHub nach 4 Min. ab (Skript selbst max. 150 s)
     steps:
       - uses: actions/checkout@v5
 
