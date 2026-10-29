@@ -8,23 +8,23 @@ Steuert den „Time of Use“-Schalter (TOU) eines Solis RAI-3K-48ES-5G über di
 
 ## Prinzip
 
-Im Wechselrichter ist ein **Ladeslot mit 0,1 A** eingestellt. Ist TOU an, lädt der Wechselrichter in dieser Zeit minimal, und die Pylontech-BMS gehen schlafen. Das Skript prüft ab dem **Abendbeginn** stündlich den SOC und schaltet TOU ein, sobald er unter die Schwelle des Monats fällt. Morgens um 07:00 schaltet es TOU wieder aus.
+Im Wechselrichter ist ein **Ladeslot mit 0,1 A** eingestellt. Ist TOU an, lädt der Wechselrichter in dieser Zeit minimal, und die Pylontech-BMS gehen schlafen. Das Skript prüft ab dem **Abendbeginn** stündlich den SOC und schaltet TOU ein, sobald er unter die Schwelle des Monats fällt. Morgens um 07:15 schaltet es TOU wieder aus.
 
-**Monatsplan** (`MONATSPLAN` im Skript): Der Abendbeginn ist Sonnenuntergang −1 Std., jeweils der späteste Wert des Monats, auf die volle Stunde aufgerundet. So beginnt der Akkuschlaf nie, solange die Sonne noch laden könnte – **die Sonne hat Vorrang**. Berechnet für Norddeutschland (ca. 52° N), für andere Orte anpassen.
+**Monatsplan** (`MONATSPLAN` im Skript): Der Abendbeginn ist Sonnenuntergang −1 Std., jeweils der späteste Wert des Monats, auf die volle Stunde aufgerundet, plus 15 Minuten passend zum Lauftakt. So beginnt der Akkuschlaf nie, solange die Sonne noch laden könnte – **die Sonne hat Vorrang**. Berechnet für Norddeutschland (ca. 52° N), für andere Orte anpassen.
 
 | Monat | Abendbeginn = Start Ladeslot 1 |
 |---|---|
-| Januar | 17:00 |
-| Februar | 18:00 |
-| März | 18:00, ab Sommerzeit 19:00 |
-| April | 20:00 |
-| Mai–August | 21:00 |
-| September | 20:00 |
-| Oktober | 19:00, ab Winterzeit 17:00 |
-| November | 17:00 |
-| Dezember | 16:00 |
+| Januar | 17:15 |
+| Februar | 18:15 |
+| März | 18:15, ab Sommerzeit 19:15 |
+| April | 20:15 |
+| Mai–August | 21:15 |
+| September | 20:15 |
+| Oktober | 19:15, ab Winterzeit 17:15 |
+| November | 17:15 |
+| Dezember | 16:15 |
 
-TOU an bei **SOC ≤ 15 %**, von **November bis Februar ≤ 30 %** (je Monat änderbar, kostet keine Schreibvorgänge). In diesen Wintermonaten kann das Skript zusätzlich die **Entladegrenze** auf 30 % setzen (siehe unten). Ladeslot 1 läuft immer vom Abendbeginn bis **07:00** mit **0,1 A**. TOU aus ab 07:00, Aus-Sicherungen bis 10 Uhr.
+TOU an bei **SOC ≤ 15 %**, von **November bis Februar ≤ 30 %** (je Monat änderbar, kostet keine Schreibvorgänge). In diesen Wintermonaten kann das Skript zusätzlich die **Entladegrenze** auf 30 % setzen (siehe unten). Ladeslot 1 läuft immer vom Abendbeginn bis **07:15** mit **0,1 A** – Beginn und Ende liegen genau auf den Startzeiten bei cron-job.org (Minute 15, `SLOT_MINUTE`). TOU aus ab 07:15, Aus-Sicherungen bis 10 Uhr.
 
 - In der Prüfphase wird **nur eingeschaltet, nie ausgeschaltet**.
 - **Ladeslot nachführen:** Morgens prüft das Skript, ob Ladeslot 1 zur kommenden Nacht passt, und setzt ihn bei Bedarf neu – nur bei einem neuen Abendbeginn und bei der Zeitumstellung, also ca. 8× im Jahr. Die SOC-Schwelle wird nie geschrieben, sie gilt nur im Skript. Entladezeiten und die Slots 2 und 3 bleiben unverändert.
@@ -103,7 +103,7 @@ GitHubs eigener Zeitplan (`schedule`) startet nur „nach bestem Bemühen“: of
 | Body | `{"ref":"main","inputs":{"command":"extern"}}` |
 | Benachrichtigung | bei Fehlschlag per E-Mail |
 
-Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der Läufe heißt er dann *„Extern (cron-job.org)“*, manuelle Läufe heißen *„Manuell: …“*. Die Stunden 16–10 decken den frühesten Abendbeginn (Dezember, 16:00) ab. Läufe vor dem Abendbeginn des Monats sind nur Aus-Sicherungen. Wird ein Abendbeginn im `MONATSPLAN` früher als 16 Uhr gelegt, den Job erweitern.
+Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der Läufe heißt er dann *„Extern (cron-job.org)“*, manuelle Läufe heißen *„Manuell: …“*. Die Stunden 16–10 decken den frühesten Abendbeginn (Dezember, 16:15) ab. Läufe vor dem Abendbeginn des Monats sind nur Aus-Sicherungen. Wird ein Abendbeginn im `MONATSPLAN` früher als 16 Uhr gelegt, den Job erweitern.
 
 **Ohne Reserve:** Fällt cron-job.org aus, läuft nichts. Deshalb die Fehler-Benachrichtigung dort einschalten. Notfalls von Hand starten (*Run workflow* → `auto` ohne Dry-Run). Bleibt TOU morgens versehentlich an, passiert tagsüber nichts (siehe *Sicherheit*).
 

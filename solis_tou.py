@@ -9,14 +9,14 @@ Prinzip
   * Abends/nachts (Prüfphase, ab dem Abendbeginn des Monats): stündlich SOC
     prüfen. Ist SOC <= Schwelle des Monats, wird TOU EINgeschaltet. In der
     Prüfphase wird TOU NIE ausgeschaltet.
-  * ab 07:00: TOU wird AUSgeschaltet (mehrere Läufe bis Vormittag als Sicherung).
-  * Morgens wird Ladeslot 1 (Abendbeginn–07:00, 0,1 A) automatisch auf den Plan
+  * ab 07:15: TOU wird AUSgeschaltet (mehrere Läufe bis Vormittag als Sicherung).
+  * Morgens wird Ladeslot 1 (Abendbeginn–07:15, 0,1 A) automatisch auf den Plan
     der kommenden Nacht gesetzt, falls die Zeit abweicht oder der Ladestrom
     deutlich zu hoch ist. Das passiert nur bei Monatswechseln mit neuem
     Abendbeginn und bei der Zeitumstellung (ca. 8× im Jahr).
 
 Monatsplan (siehe MONATSPLAN): Abendbeginn = Sonnenuntergang −1 Std., auf die
-volle Stunde aufgerundet (die Sonne hat Vorrang). TOU aus immer ab 07:00.
+volle Stunde aufgerundet, Slot jeweils ab Minute 15 (die Sonne hat Vorrang). TOU aus ab 07:15.
 
 Schalten: pro Lauf ein Schreibbefehl je Register. Danach Kontrolle durch
 Zurücklesen. Nicht bestätigt → Warnung; der nächste Lauf prüft erneut.
@@ -63,7 +63,8 @@ import requests
 # ============================ EINSTELLUNGEN ================================
 
 # Monatsplan – gilt für die Nacht, die an einem Tag dieses Monats beginnt.
-#   abend    = Abendbeginn (volle Stunde): Start von Ladeslot 1 UND Beginn der SOC-Prüfung
+#   abend    = Abendbeginn (Stunde; Slot startet zur Minute SLOT_MINUTE): Start von Ladeslot 1
+#              UND Beginn der SOC-Prüfung
 #   abend_sz = abweichender Abendbeginn, solange Sommerzeit gilt (nur März und Oktober nötig;
 #              die Zeitumstellung erkennt das Skript selbst)
 #   soc      = TOU an, wenn SOC <= diesem Wert (kostet keine Schreibvorgänge, frei änderbar)
@@ -87,6 +88,7 @@ MONATSPLAN = {
     12: {"abend": 16, "soc": 30, "odsoc": 30},
 }
 LADESTROM = "0.1"         # Ladestrom von Slot 1 in A (lässt die Pylontech-BMS schlafen)
+SLOT_MINUTE = 15          # Minute für Beginn und Ende von Ladeslot 1 = Startminute bei cron-job.org
 
 # Entladegrenze (Overdischarge-SOC): Darunter entlädt der Wechselrichter den Akku nicht weiter.
 # Im Winter (Nov–Feb) 30 % als Puffer, sonst ODSOC_NORMAL.
@@ -490,12 +492,12 @@ def plan(d: date) -> dict:
     sommerzeit = bool(datetime(d.year, d.month, d.day, 18, tzinfo=ZEITZONE).dst())
     abend = m["abend_sz"] if sommerzeit and "abend_sz" in m else m["abend"]
     return {"abend": abend, "soc": m["soc"], "odsoc": m.get("odsoc", ODSOC_NORMAL),
-            "ladezeit": f"{abend:02d}:00-{AUS_BEGINN:02d}:00"}
+            "ladezeit": f"{abend:02d}:{SLOT_MINUTE:02d}-{AUS_BEGINN:02d}:{SLOT_MINUTE:02d}"}
 
 
 def plan_text(d: date) -> str:
     p = plan(d)
-    return f"ab {p['abend']}:00, SOC <= {p['soc']} %"
+    return f"ab {p['abend']}:{SLOT_MINUTE:02d}, SOC <= {p['soc']} %"
 
 
 # Ältere Protokollzeilen enthalten noch den Saisonnamen statt der Ladezeit
@@ -519,7 +521,7 @@ def entscheide(now: datetime, tou_an: bool | None, soc: float | None) -> tuple[b
     """(Soll-Zustand oder None = nichts tun, Begründung)."""
     if phase(now) == "aus":
         heute = plan(now.date())["abend"]
-        return False, f"Tagsüber (ab {AUS_BEGINN}:00 bis {heute}:00) → TOU AUS, Akkus laufen normal"
+        return False, f"Tagsüber (ab {AUS_BEGINN}:{SLOT_MINUTE:02d} bis {heute}:{SLOT_MINUTE:02d}) → TOU AUS, Akkus laufen normal"
 
     # Prüfphase – hier wird NUR eingeschaltet, nie ausgeschaltet
     schwelle = plan(nacht_datum(now))["soc"]
@@ -805,7 +807,7 @@ def _ablauf(a, now: datetime) -> int:
 
     if a.command == "status":
         n, h = plan(nacht_datum(now)), plan(now.date())
-        print(f"Plan dieser Nacht: Prüfung {n['abend']}:00–{PRUEF_ENDE}:59 Uhr, SOC <= {n['soc']} %, "
+        print(f"Plan dieser Nacht: Prüfung ab {n['abend']}:{SLOT_MINUTE:02d}, letzte {PRUEF_ENDE}:{SLOT_MINUTE:02d} Uhr, SOC <= {n['soc']} %, "
               f"Ladeslot {n['ladezeit']} mit {LADESTROM} A")
         if h != n:
             print(f"Plan ab heute Abend: {plan_text(now.date())}, Ladeslot {h['ladezeit']}")

@@ -20,15 +20,15 @@ Immer morgens um 07:15 für die kommende Nacht, aber nur, wenn sich der Abendbeg
 
 | Datum | Ladeslot 1 |
 |---|---|
-| 01.01. | 17:00–07:00 |
-| 01.02. | 18:00–07:00 |
-| Beginn Sommerzeit (letzter So. im März) | 19:00–07:00 |
-| 01.04. | 20:00–07:00 |
-| 01.05. | 21:00–07:00 |
-| 01.09. | 20:00–07:00 |
-| 01.10. | 19:00–07:00 |
-| Ende Sommerzeit (letzter So. im Oktober) | 17:00–07:00 |
-| 01.12. | 16:00–07:00 |
+| 01.01. | 17:15–07:15 |
+| 01.02. | 18:15–07:15 |
+| Beginn Sommerzeit (letzter So. im März) | 19:15–07:15 |
+| 01.04. | 20:15–07:15 |
+| 01.05. | 21:15–07:15 |
+| 01.09. | 20:15–07:15 |
+| 01.10. | 19:15–07:15 |
+| Ende Sommerzeit (letzter So. im Oktober) | 17:15–07:15 |
+| 01.12. | 16:15–07:15 |
 
 Dazu prüft jeder Morgenlauf, ob der Ladestrom noch 0,1 A beträgt. Klappt das Schreiben um 07:15 nicht, holen es die Läufe um 08:15–10:15 nach.
 
