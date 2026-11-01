@@ -123,8 +123,10 @@ Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der 
 
 Im Winter reicht die Sonne selten, um die Akkus voll zu laden. Damit sie nicht wochenlang am unteren Rand hängen, kann das Skript die **Entladegrenze** (Overdischarge-SOC, in der App unter *Battery settings*) von **November bis Februar auf 30 %** setzen und am 1. März wieder auf deinen Normalwert. Der Wechselrichter entlädt den Akku dann nicht unter 30 %, und das Skript legt ihn bei SOC ≤ 30 % schlafen.
 
-- **2 Schreibvorgänge im Jahr** (1. November und 1. März, jeweils morgens).
-- **Kontrolle:** Nach dem Schreiben wird zurückgelesen. Zusätzlich vergleicht jeder Morgenlauf den Wert mit dem Plan und schreibt bei Abweichung erneut (höchstens einmal pro Lauf). Fällt ein Lauf aus, holt es der nächste nach.
+- **Beim RAI-3K-48ES-5G nicht aus der Ferne schreibbar:** App, Web und API melden beim Overdischarge-SOC „Datenlogger offline“ (TOU und Force-Charge-SOC funktionieren). Deshalb steht `ODSOC_SCHREIBEN = False`: Das Skript **prüft nur** und schickt bei Abweichung morgens **eine Fehler-Mail pro Tag** als Erinnerung – also am 1. November und am 1. März. Dann den Wert am Gerät einstellen (Display oder SolisTech-View-App per Direktverbindung).
+- Geräte, die das Schreiben zulassen: `ODSOC_SCHREIBEN = True` → 2 Schreibvorgänge im Jahr (1. November und 1. März, jeweils morgens).
+- **Kontrolle:** Nach dem Schreiben wird zweimal zurückgelesen (nach 15 und 30 s). Jeder Morgenlauf vergleicht den Wert mit dem Plan (nur lesen).
+- **Sperre:** Bleibt ein Schreibversuch unbestätigt (Cloud nimmt an, Wechselrichter übernimmt nicht – z. B. Datenlogger offline), gibt es **Fehler + E-Mail** und **höchstens einen Versuch pro Tag**; der nächste folgt am nächsten Morgen. Dasselbe gilt für den Ladeslot. Der manuelle Befehl `ladeslot` umgeht die Sperre.
 - **CID:** Beim RAI-3K-48ES-5G ist es **CID 158** (157 = Reserve-/Backup-SOC, 160 = Force-Charge-SOC), die Steuerung ist eingeschaltet. **Bei anderen Geräten** vorher prüfen und ggf. `ODSOC_STEUERN = False` setzen:
   1. *Run workflow* → `grenzen` starten. Das liest drei Kandidaten (CID 157, 158, 160) nur aus.
   2. Die Werte mit der Solis-App vergleichen: Welche CID zeigt den Overdischarge-SOC? (Sicherheitshalber den Wert in der App kurz testweise ändern und `grenzen` erneut starten.)

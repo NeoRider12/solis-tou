@@ -97,6 +97,10 @@ SLOT_MINUTE = 15          # Minute für Beginn und Ende von Ladeslot 1 = Startmi
 # Schwelle (soc) und Entladegrenze (odsoc) bewusst IDENTISCH halten: Der Akku entlädt bis zur
 # Grenze, schläft dort ein und bleibt nach dem Ausschalten morgens sparsam im Standby.
 ODSOC_STEUERN = True
+# Beim RAI-3K-48ES-5G lässt sich der Overdischarge-SOC NICHT aus der Ferne ändern (App/Web/API
+# melden 'Datenlogger offline', TOU und Force-Charge-SOC gehen). Daher nur prüfen und erinnern:
+# Weicht der Wert vom Plan ab, gibt es morgens EINE Fehler-Mail pro Tag ('bitte am Gerät einstellen').
+ODSOC_SCHREIBEN = False   # True = per API schreiben (nur wenn dein Gerät das zulässt)
 ODSOC_CID = 158           # bestätigt am 23.10.2026 (Abgleich mit der Solis-App)
 ODSOC_NORMAL = 15         # Overdischarge-SOC außerhalb des Winters (bewusst = SOC-Schwelle)
 GRENZEN_KANDIDATEN = {    # werden von "grenzen" nur gelesen (beim RAI-3K-48ES-5G bestätigt)
@@ -603,20 +607,54 @@ def setze_ladeslot(d: date, dry_run: bool, alt: str | None = None) -> bool:
         return True
     write_cid(CID_CHARGE_DISCHARGE, neu, alt)
     print("Schreibbefehl von der Cloud angenommen.")
-    protokolliere("LADESLOT", None, f"{ziel['zeit']}, {ziel['strom']} A")
+    text = f"{ziel['zeit']}, {ziel['strom']} A"
     if restzeit() < 25:
+        protokolliere("LADESLOT", None, f"{text}, ohne Kontrolle (Zeitbudget)")
         print("Kein Zeitbudget mehr für die Kontrolle – der nächste Lauf prüft erneut.")
         return True
-    time.sleep(15)
-    zurueck = read_cid(CID_CHARGE_DISCHARGE)
-    print(f"Zurückgelesen: {zurueck}")
-    t = zurueck.split(",")
-    if len(t) == 12 and t[2] == ziel["zeit"]:
-        print(f"OK – Ladezeit {ziel['zeit']} bestätigt. Ladestrom wird als '{t[0]}' angezeigt "
-              f"(0,1 A erscheint gerundet als 0) – bitte in der App kontrollieren.")
+    ok, zurueck = zuruecklesen(CID_CHARGE_DISCHARGE,
+                               lambda w: len(w.split(",")) == 12 and w.split(",")[2] == ziel["zeit"])
+    if ok is None:
+        protokolliere("LADESLOT", None, f"{text}, Kontrolle unvollständig (Zeitbudget)")
+        print("Kontrolle aus Zeitmangel unvollständig – der nächste Lauf prüft erneut.")
         return True
-    print("::warning::Neue Ladezeit noch nicht bestätigt – bitte in der App prüfen.")
+    protokolliere("LADESLOT", None, f"{text}, {'bestätigt' if ok else 'unbestätigt'}")
+    if ok:
+        print(f"OK – Ladezeit {ziel['zeit']} bestätigt. Ladestrom wird als '{zurueck.split(',')[0]}' "
+              f"angezeigt (0,1 A erscheint gerundet als 0) – bitte in der App kontrollieren.")
+        return True
+    print("::warning::Neue Ladezeit nicht bestätigt – Cloud hat angenommen, Wechselrichter "
+          "hat nicht übernommen (Datenlogger offline?).")
     return False
+
+
+def zuruecklesen(cid: int, passt) -> tuple[bool | None, str]:
+    """Kontrolle nach dem Schreiben: bis zu zwei Rücklesungen (RUECKLESE_WARTEZEIT).
+    Rückgabe True = bestätigt, False = nach allen Kontrollen nicht bestätigt,
+    None = Kontrolle aus Zeitmangel unvollständig (der nächste Lauf prüft erneut).
+    Ein Cloud-Aussetzer beim Rücklesen zählt als 'nicht bestätigt'."""
+    wert = ""
+    for i, warte in enumerate(RUECKLESE_WARTEZEIT):
+        if restzeit() < warte + 10:
+            return None, wert
+        time.sleep(warte)
+        try:
+            wert = read_cid(cid)
+        except Fehler as e:
+            print(f"Rücklesen ({i + 1}. Kontrolle) fehlgeschlagen: {e}")
+            continue
+        print(f"Zurückgelesen ({i + 1}. Kontrolle): {wert}")
+        if passt(wert):
+            return True, wert
+    return False, wert
+
+
+def heute_unbestaetigt(ereignis: str, now: datetime) -> bool:
+    """True, wenn heute schon ein Schreibversuch dieser Art unbestätigt blieb (Sperre:
+    höchstens ein Versuch pro Tag). Ohne Protokoll nicht feststellbar → False."""
+    heute = now.strftime("%Y-%m-%d")
+    return any(e["ereignis"] == ereignis and e["zeit"].startswith(heute) and "unbestätigt" in e["info"]
+               for e in lies_ereignisse())
 
 
 def strom_passt(gelesen: str, ziel: str) -> bool:
@@ -631,25 +669,33 @@ def strom_passt(gelesen: str, ziel: str) -> bool:
     return g <= 0.1 if z < 1 else abs(g - z) < 0.05
 
 
-def ladeslot_abgleich(now: datetime, dry_run: bool) -> None:
+def ladeslot_abgleich(now: datetime, dry_run: bool) -> bool:
     """Morgens: Ladeslot 1 auf den Plan der kommenden Nacht setzen, falls die Zeit
-    abweicht oder der Ladestrom deutlich zu hoch ist (0,1 A liest die API als 0)."""
+    abweicht oder der Ladestrom deutlich zu hoch ist (0,1 A liest die API als 0).
+    Rückgabe False = Schreibversuch nicht bestätigt (→ Fehler + E-Mail)."""
     heute = now.date()
     ziel = plan(heute)["ladezeit"]
     if restzeit() < 35:
         print("Ladeslot-Abgleich übersprungen (Zeitbudget) – nächster Lauf.")
-        return
+        return True
     alt = read_cid(CID_CHARGE_DISCHARGE)
     teile = alt.split(",")
     if len(teile) == 12 and teile[2] == ziel:
         if strom_passt(teile[0], LADESTROM):
             print(f"Ladeslot 1 passt zum Plan ({teile[2]}).")
-            return
+            return True
         print(f"Ladeslot 1: Zeit passt, aber Ladestrom '{teile[0]}' A statt "
               f"{LADESTROM} A – wird korrigiert.")
     else:
         print(f"Neuer Abendbeginn: Ladeslot 1 ({teile[2] if len(teile) == 12 else '?'}) → {ziel}.")
-    setze_ladeslot(heute, dry_run, alt)
+    if heute_unbestaetigt("LADESLOT", now):
+        print("Sperre: Heute blieb schon ein Schreibversuch unbestätigt – nächster Versuch morgen früh.")
+        return True
+    if setze_ladeslot(heute, dry_run, alt):
+        return True
+    protokolliere("FEHLER", None, f"Ladeslot {ziel} nicht übernommen (Datenlogger offline?) – "
+                                  "nächster Versuch morgen früh")
+    return False
 
 
 def odsoc_aktiv() -> bool:
@@ -681,24 +727,62 @@ def setze_entladegrenze(d: date, dry_run: bool, alt: str | None = None) -> bool:
         protokolliere("ENTLADEGRENZE", None, f"{ist} → {ziel} %, ohne Kontrolle (Zeitbudget)")
         print("Kein Zeitbudget mehr für die Kontrolle – der nächste Lauf prüft erneut.")
         return True
-    time.sleep(15)
-    zurueck = read_cid(ODSOC_CID)
-    ok = zurueck.strip() not in ("", "-") and int(float(zurueck)) == ziel
+    def passt(w: str) -> bool:
+        try:
+            return int(float(w)) == ziel
+        except ValueError:
+            return False
+    ok, zurueck = zuruecklesen(ODSOC_CID, passt)
+    if ok is None:
+        protokolliere("ENTLADEGRENZE", None, f"{ist} → {ziel} %, Kontrolle unvollständig (Zeitbudget)")
+        print("Kontrolle aus Zeitmangel unvollständig – der nächste Lauf prüft erneut.")
+        return True
     protokolliere("ENTLADEGRENZE", None, f"{ist} → {ziel} %, {'bestätigt' if ok else 'unbestätigt'}")
     if ok:
         print(f"OK – Entladegrenze {ziel} % bestätigt.")
         return True
-    print(f"::warning::Entladegrenze noch nicht bestätigt (gelesen: {zurueck}) – der nächste Lauf prüft erneut.")
+    print(f"::warning::Entladegrenze nicht bestätigt (gelesen: {zurueck or '?'}) – Cloud hat angenommen, "
+          "Wechselrichter hat nicht übernommen (Datenlogger offline?).")
     return False
 
 
-def entladegrenze_abgleich(now: datetime, dry_run: bool) -> None:
+def entladegrenze_abgleich(now: datetime, dry_run: bool) -> bool:
     """Morgens: Entladegrenze mit dem Plan der kommenden Nacht vergleichen (nur lesen),
-    bei Abweichung einmal schreiben. Fehlt das Zeitbudget, macht es der nächste Lauf."""
+    bei Abweichung schreiben – höchstens ein unbestätigter Versuch pro Tag (Sperre).
+    Fehlt das Zeitbudget, macht es der nächste Lauf. Rückgabe False → Fehler + E-Mail."""
     if restzeit() < 35:
         print("Entladegrenze-Abgleich übersprungen (Zeitbudget) – nächster Lauf.")
-        return
-    setze_entladegrenze(now.date(), dry_run)
+        return True
+    ziel = plan(now.date())["odsoc"]
+    alt = read_cid(ODSOC_CID)
+    if alt.strip() == str(ziel) or _gleich(alt, ziel):
+        print(f"Entladegrenze passt zum Plan ({ziel} %).")
+        return True
+    if not ODSOC_SCHREIBEN:
+        text = f"Entladegrenze {alt.strip()} % statt {ziel} % – bitte am Gerät einstellen"
+        if any(e["ereignis"] == "FEHLER" and e["info"].startswith("Entladegrenze") and "am Gerät" in e["info"]
+               and e["zeit"].startswith(now.strftime("%Y-%m-%d")) for e in lies_ereignisse()):
+            print(f"{text} (Erinnerung heute schon verschickt).")
+            return True
+        print(f"::error::{text} (Overdischarge-SOC ist aus der Ferne nicht schreibbar).")
+        protokolliere("FEHLER", None, text)
+        return False
+    if heute_unbestaetigt("ENTLADEGRENZE", now):
+        print(f"Sperre: Entladegrenze {alt} % statt {ziel} %, aber heute blieb schon ein Schreibversuch "
+              "unbestätigt – nächster Versuch morgen früh.")
+        return True
+    if setze_entladegrenze(now.date(), dry_run, alt):
+        return True
+    protokolliere("FEHLER", None, f"Entladegrenze {ziel} % nicht übernommen (Datenlogger offline?) – "
+                                  "nächster Versuch morgen früh")
+    return False
+
+
+def _gleich(wert: str, ziel: int) -> bool:
+    try:
+        return int(float(wert)) == ziel
+    except ValueError:
+        return False
 
 
 def zeige_grenzen() -> None:
@@ -766,8 +850,11 @@ def main() -> int:
 def _ablauf(a, now: datetime) -> int:
     if a.command == "ladeslot":
         ok = setze_ladeslot(now.date(), a.dry_run)
-        if odsoc_aktiv():
+        if odsoc_aktiv() and ODSOC_SCHREIBEN:
             ok = setze_entladegrenze(now.date(), a.dry_run) and ok
+        elif odsoc_aktiv():
+            print(f"Entladegrenze: {read_cid(ODSOC_CID)} %, Plan {plan(now.date())['odsoc']} % "
+                  "(wird nicht geschrieben – am Gerät einstellen)")
         return 0 if ok else 1
 
     if a.command == "grenzen":
@@ -836,12 +923,14 @@ def _ablauf(a, now: datetime) -> int:
 
     if LADESLOT_ABGLEICH and phase(now) == "aus":
         try:
-            ladeslot_abgleich(now, a.dry_run)
+            if not ladeslot_abgleich(now, a.dry_run):
+                rc = 1
         except Fehler as e:
             print(f"::warning::Ladeslot-Abgleich fehlgeschlagen: {e}")
         if odsoc_aktiv():
             try:
-                entladegrenze_abgleich(now, a.dry_run)
+                if not entladegrenze_abgleich(now, a.dry_run):
+                    rc = 1
             except Fehler as e:
                 print(f"::warning::Entladegrenze-Abgleich fehlgeschlagen: {e}")
                 protokolliere("WARNUNG", None, f"Entladegrenze-Abgleich: {e}")
