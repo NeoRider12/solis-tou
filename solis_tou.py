@@ -29,6 +29,7 @@ Aufruf
   python3 solis_tou.py off  [--dry-run]  # TOU sofort ausschalten
   python3 solis_tou.py ladeslot [--dry-run]  # Ladeslot 1 (+ Entladegrenze) sofort auf den heutigen Plan
   python3 solis_tou.py grenzen           # SOC-Grenzen im Wechselrichter nur lesen
+  python3 solis_tou.py pv                # PV-/Leistungsfelder roh anzeigen (nur lesen)
   python3 solis_tou.py protokoll         # PROTOKOLL.md neu erzeugen und anzeigen
 
 Protokoll (optional): Ist die Umgebungsvariable PROTOKOLL_DIR gesetzt, wird jede
@@ -73,9 +74,11 @@ import requests
 # Abendbeginn = Sonnenuntergang −1 Std., spätester Wert des Monats, auf volle Stunde aufgerundet.
 # ACHTUNG: Wird ein Abendbeginn früher als 16 Uhr gelegt, den cron-job.org-Job erweitern
 #          (er startet erst ab 16:15).
+# Winterpuffer (Nov–Feb soc 30 + odsoc 30) ist derzeit AUS, weil sich der Overdischarge-SOC
+# nur am Gerät ändern lässt. Wieder aktivieren: bei 11, 12, 1, 2  "soc": 30, "odsoc": 30  eintragen.
 MONATSPLAN = {
-    1:  {"abend": 17, "soc": 30, "odsoc": 30},
-    2:  {"abend": 18, "soc": 30, "odsoc": 30},
+    1:  {"abend": 17, "soc": 15},
+    2:  {"abend": 18, "soc": 15},
     3:  {"abend": 18, "abend_sz": 19, "soc": 15},
     4:  {"abend": 20, "soc": 15},
     5:  {"abend": 21, "soc": 15},
@@ -84,8 +87,8 @@ MONATSPLAN = {
     8:  {"abend": 21, "soc": 15},
     9:  {"abend": 20, "soc": 15},
     10: {"abend": 17, "abend_sz": 19, "soc": 15},
-    11: {"abend": 17, "soc": 30, "odsoc": 30},
-    12: {"abend": 16, "soc": 30, "odsoc": 30},
+    11: {"abend": 17, "soc": 15},
+    12: {"abend": 16, "soc": 15},
 }
 LADESTROM = "0.1"         # Ladestrom von Slot 1 in A (lässt die Pylontech-BMS schlafen)
 SLOT_MINUTE = 15          # Minute für Beginn und Ende von Ladeslot 1 = Startminute bei cron-job.org
@@ -785,6 +788,17 @@ def _gleich(wert: str, ziel: int) -> bool:
         return False
 
 
+def zeige_pv() -> None:
+    """Zeigt die PV-/Leistungsfelder aus inverterDetail roh an (nur lesen) – zur Prüfung der Auflösung."""
+    import re
+    data = _post("/v1/api/inverterDetail", {"sn": INVERTER_SN})
+    muster = re.compile(r"(pac|pow\d|pv|power|load|eToday|eTotal|dataTimestamp)", re.I)
+    print("PV-/Leistungsfelder aus inverterDetail (roh):")
+    for k in sorted(data):
+        if muster.search(k) and not isinstance(data[k], (dict, list)):
+            print(f"  {k:28} = {data[k]!r}")
+
+
 def zeige_grenzen() -> None:
     """Liest die Kandidaten-CIDs für SOC-Grenzen (nur lesen) – zum Abgleich mit der Solis-App."""
     print("SOC-Grenzen (nur gelesen) – bitte mit den Werten in der Solis-App vergleichen:")
@@ -799,7 +813,7 @@ def zeige_grenzen() -> None:
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Solis TOU / Akku-Schlaf per SolisCloud-API")
-    p.add_argument("command", choices=["status", "auto", "on", "off", "ladeslot", "grenzen", "protokoll"])
+    p.add_argument("command", choices=["status", "auto", "on", "off", "ladeslot", "grenzen", "pv", "protokoll"])
     p.add_argument("--dry-run", action="store_true", help="nur anzeigen, nichts schreiben")
     a = p.parse_args()
 
@@ -859,6 +873,10 @@ def _ablauf(a, now: datetime) -> int:
 
     if a.command == "grenzen":
         zeige_grenzen()
+        return 0
+
+    if a.command == "pv":
+        zeige_pv()
         return 0
 
     if a.command in ("on", "off"):

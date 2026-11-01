@@ -24,7 +24,7 @@ Im Wechselrichter ist ein **Ladeslot mit 0,1 A** eingestellt. Ist TOU an, lädt 
 | November | 17:15 |
 | Dezember | 16:15 |
 
-TOU an bei **SOC ≤ 15 %**, von **November bis Februar ≤ 30 %** (je Monat änderbar, kostet keine Schreibvorgänge). In diesen Wintermonaten kann das Skript zusätzlich die **Entladegrenze** auf 30 % setzen (siehe unten). Ladeslot 1 läuft immer vom Abendbeginn bis **07:15** mit **0,1 A** – Beginn und Ende liegen genau auf den Startzeiten bei cron-job.org (Minute 15, `SLOT_MINUTE`). TOU aus ab 07:15, Aus-Sicherungen bis 10 Uhr.
+TOU an bei **SOC ≤ 15 %**, ganzjährig (je Monat änderbar, kostet keine Schreibvorgänge). Optional gibt es einen **Winterpuffer** mit 30 % von November bis Februar, er ist derzeit ausgeschaltet (siehe *Entladegrenze im Winter*). Ladeslot 1 läuft immer vom Abendbeginn bis **07:15** mit **0,1 A** – Beginn und Ende liegen genau auf den Startzeiten bei cron-job.org (Minute 15, `SLOT_MINUTE`). TOU aus ab 07:15, Aus-Sicherungen bis 10 Uhr.
 
 - In der Prüfphase wird **nur eingeschaltet, nie ausgeschaltet**.
 - **Ladeslot nachführen:** Morgens prüft das Skript, ob Ladeslot 1 zur kommenden Nacht passt, und setzt ihn bei Bedarf neu – nur bei einem neuen Abendbeginn und bei der Zeitumstellung, also ca. 8× im Jahr. Die SOC-Schwelle wird nie geschrieben, sie gilt nur im Skript. Entladezeiten und die Slots 2 und 3 bleiben unverändert.
@@ -119,7 +119,9 @@ Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der 
 - **Zugangsdaten** erscheinen nie, sie werden immer als `***` ausgeblendet.
 - **Empfehlung:** *Settings → Actions → General → Artifact and log retention* auf **1 Tag** stellen.
 
-## Entladegrenze im Winter (optional)
+## Entladegrenze im Winter (optional, derzeit aus)
+
+> **Derzeit ausgeschaltet:** Schwelle und Entladegrenze stehen ganzjährig auf 15 %. Zum Aktivieren im `MONATSPLAN` bei den Monaten 11, 12, 1 und 2 `"soc": 30, "odsoc": 30` eintragen.
 
 Im Winter reicht die Sonne selten, um die Akkus voll zu laden. Damit sie nicht wochenlang am unteren Rand hängen, kann das Skript die **Entladegrenze** (Overdischarge-SOC, in der App unter *Battery settings*) von **November bis Februar auf 30 %** setzen und am 1. März wieder auf deinen Normalwert. Der Wechselrichter entlädt den Akku dann nicht unter 30 %, und das Skript legt ihn bei SOC ≤ 30 % schlafen.
 
@@ -138,7 +140,7 @@ Im Winter reicht die Sonne selten, um die Akkus voll zu laden. Damit sie nicht w
 
 ```python
 MONATSPLAN = {
-    1:  {"abend": 17, "soc": 30, "odsoc": 30},
+    1:  {"abend": 17, "soc": 15},   # Winterpuffer: "soc": 30, "odsoc": 30
     # …
     3:  {"abend": 18, "abend_sz": 19, "soc": 15},   # abend_sz = solange Sommerzeit gilt
     # …
