@@ -29,7 +29,7 @@ Aufruf
   python3 solis_tou.py off  [--dry-run]  # TOU sofort ausschalten
   python3 solis_tou.py ladeslot [--dry-run]  # Ladeslot 1 (+ Entladegrenze) sofort auf den heutigen Plan
   python3 solis_tou.py grenzen           # SOC-Grenzen im Wechselrichter nur lesen
-  python3 solis_tou.py pv                # PV-/Leistungsfelder roh anzeigen (nur lesen)
+  python3 solis_tou.py pv                # alle Messwerte roh anzeigen (nur lesen)
   python3 solis_tou.py protokoll         # PROTOKOLL.md neu erzeugen und anzeigen
 
 Protokoll (optional): Ist die Umgebungsvariable PROTOKOLL_DIR gesetzt, wird jede
@@ -789,13 +789,14 @@ def _gleich(wert: str, ziel: int) -> bool:
 
 
 def zeige_pv() -> None:
-    """Zeigt die PV-/Leistungsfelder aus inverterDetail roh an (nur lesen) – zur Prüfung der Auflösung."""
+    """Zeigt alle Felder aus inverterDetail roh an (nur lesen) – zur Suche nach Netz-/PV-Werten."""
     import re
     data = _post("/v1/api/inverterDetail", {"sn": INVERTER_SN})
-    muster = re.compile(r"(pac|pow\d|pv|power|load|eToday|eTotal|dataTimestamp)", re.I)
-    print("PV-/Leistungsfelder aus inverterDetail (roh):")
+    # Alle Einzelwerte ausgeben, außer leeren PV-Strings 3–32 (das Gerät hat höchstens 2)
+    leer = re.compile(r"^[uip]Pv([3-9]|[1-3]\d)(Str)?$|^pow([3-9]|[1-3]\d)(Str)?$")
+    print("Alle Felder aus inverterDetail (roh):")
     for k in sorted(data):
-        if muster.search(k) and not isinstance(data[k], (dict, list)):
+        if not isinstance(data[k], (dict, list)) and not leer.match(k) and k != "sn":
             print(f"  {k:28} = {data[k]!r}")
 
 
