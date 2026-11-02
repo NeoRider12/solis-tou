@@ -24,7 +24,7 @@ Im Wechselrichter ist ein **Ladeslot mit 0,1 A** eingestellt. Ist TOU an, lädt 
 | November | 17:15 |
 | Dezember | 16:15 |
 
-TOU an bei **SOC ≤ 15 %**, ganzjährig (je Monat änderbar, kostet keine Schreibvorgänge). Optional gibt es einen **Winterpuffer** mit 30 % von November bis Februar, er ist derzeit ausgeschaltet (siehe *Entladegrenze im Winter*). Ladeslot 1 läuft immer vom Abendbeginn bis **07:15** mit **0,1 A** – Beginn und Ende liegen genau auf den Startzeiten bei cron-job.org (Minute 15, `SLOT_MINUTE`). TOU aus ab 07:15, Aus-Sicherungen bis 10 Uhr.
+TOU an bei **SOC ≤ 15 %**, ganzjährig (je Monat änderbar, kostet keine Schreibvorgänge). Optional gibt es einen **Winterpuffer** mit 30 % von November bis Februar, er ist derzeit ausgeschaltet (siehe *Entladegrenze im Winter*). Ladeslot 1 läuft vom Abendbeginn bis **07:15** mit **0,1 A** – Beginn und Ende liegen genau auf den Startzeiten bei cron-job.org (Minute 15, `SLOT_MINUTE`). TOU aus ab 07:15, Aus-Sicherungen bis 10 Uhr. **Ausnahme November–Februar:** Winterschlaf, siehe unten.
 
 - In der Prüfphase wird **nur eingeschaltet, nie ausgeschaltet**.
 - **Ladeslot nachführen:** Morgens prüft das Skript, ob Ladeslot 1 zur kommenden Nacht passt, und setzt ihn bei Bedarf neu – nur bei einem neuen Abendbeginn und bei der Zeitumstellung, also ca. 8× im Jahr. Die SOC-Schwelle wird nie geschrieben, sie gilt nur im Skript. Entladezeiten und die Slots 2 und 3 bleiben unverändert.
@@ -103,6 +103,8 @@ GitHubs eigener Zeitplan (`schedule`) startet nur „nach bestem Bemühen“: of
 | Body | `{"ref":"main","inputs":{"command":"extern"}}` |
 | Benachrichtigung | bei Fehlschlag per E-Mail |
 
+Für den Winterschlaf kommt ein **zweiter Job** dazu (siehe *Winterschlaf*).
+
 Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der Läufe heißt er dann *„Extern (cron-job.org)“*, manuelle Läufe heißen *„Manuell: …“*. Die Stunden 16–10 decken den frühesten Abendbeginn (Dezember, 16:15) ab. Läufe vor dem Abendbeginn des Monats sind nur Aus-Sicherungen. Wird ein Abendbeginn im `MONATSPLAN` früher als 16 Uhr gelegt, den Job erweitern.
 
 **Ohne Reserve:** Fällt cron-job.org aus, läuft nichts. Deshalb die Fehler-Benachrichtigung dort einschalten. Notfalls von Hand starten (*Run workflow* → `auto` ohne Dry-Run). Bleibt TOU morgens versehentlich an, passiert tagsüber nichts (siehe *Sicherheit*).
@@ -118,6 +120,24 @@ Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der 
 - **Manuelle Läufe** (`status`, `on`, …) zeigen die volle Ausgabe. Danach bei Bedarf löschen: Lauf öffnen → „…“ → *Delete workflow run*.
 - **Zugangsdaten** erscheinen nie, sie werden immer als `***` ausgeblendet.
 - **Empfehlung:** *Settings → Actions → General → Artifact and log retention* auf **1 Tag** stellen.
+
+## Winterschlaf (November–Februar)
+
+Im Winter steht der Akku morgens oft leer an der Entladegrenze – er kann dann nichts liefern, wach kostet er nur Standby (ca. 30 W). Deshalb:
+
+- **Ladeslot 1 läuft ganztags** (`00:00-23:59`, 0,1 A). Geschrieben wird nur am 1. November und am 1. März zurück.
+- **Hat der Akku nachts geschlafen, bleibt TOU morgens an.** Jeder Lauf tagsüber liest den Smart-Meter (`psum`, positiv = Einspeisung):
+  - **Einspeisung ≥ 50 W** (`WECK_SCHWELLE_W`) → Sonne, Überschuss → **TOU aus, Akku wird geweckt** und lädt.
+  - Keine oder weniger Einspeisung (Schnee, Nebel, Dauerregen, Ofen/Trockner laufen) → Akku **schläft weiter** – er könnte ohnehin nichts laden.
+- Ein wacher Akku schluckt den Überschuss selbst, die Einspeisung geht dann gegen 0 – tagsüber wird er deshalb **nicht erneut** schlafen gelegt. Abends gilt wieder die normale SOC-Prüfung.
+- Schneetage: Der Akku schläft durch bis zur nächsten Sonne, auch über mehrere Tage (Protokoll: ↻).
+- **Sicherheit:** Netzwerte älter als 15 Minuten (`NETZ_MAX_ALTER_MIN`) gelten als unbekannt → Akku schläft weiter. Wecken zweimal in Folge nicht bestätigt → Fehler + E-Mail. Die Aus-Sicherung „10 Uhr noch AN“ entfällt in diesen Monaten.
+- **Zweiter cron-job.org-Job** für schnelles Wecken (sonst bis zu 1 Std. Verzögerung): gleiche Einstellungen wie der Hauptjob (einfach klonen), Zeitplan
+
+  ```
+  0,15,30,45 8-15 * 1,2,11,12 *
+  ```
+  (alle 15 Minuten 8:00–15:45, Jan/Feb/Nov/Dez). Um 8:15–10:15 starten beide Jobs gleichzeitig – harmlos, der zweite Lauf wartet und findet nichts mehr zu tun. Reaktionszeit dann ≤ ca. 20 Min. (15 Min. Takt + bis 5 Min. Datenverzug des Loggers).
 
 ## Entladegrenze im Winter (optional, derzeit aus)
 

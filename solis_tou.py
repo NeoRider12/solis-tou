@@ -15,6 +15,9 @@ Prinzip
     deutlich zu hoch ist. Das passiert nur bei Monatswechseln mit neuem
     Abendbeginn und bei der Zeitumstellung (ca. 8× im Jahr).
 
+Winterschlaf (Nov–Feb, siehe WINTERSCHLAF_MONATE): Ladeslot 1 ganztags; hat der Akku nachts
+geschlafen, bleibt TOU morgens an, bis der Smart-Meter >= WECK_SCHWELLE_W Einspeisung misst.
+
 Monatsplan (siehe MONATSPLAN): Abendbeginn = Sonnenuntergang −1 Std., auf die
 volle Stunde aufgerundet, Slot jeweils ab Minute 15 (die Sonne hat Vorrang). TOU aus ab 07:15.
 
@@ -92,6 +95,15 @@ MONATSPLAN = {
 }
 LADESTROM = "0.1"         # Ladestrom von Slot 1 in A (lässt die Pylontech-BMS schlafen)
 SLOT_MINUTE = 15          # Minute für Beginn und Ende von Ladeslot 1 = Startminute bei cron-job.org
+
+# Winterschlaf (Nov–Feb): Hat der Akku nachts geschlafen, bleibt er tagsüber im Schlaf, bis es
+# Überschuss gibt (Einspeisung am Smart-Meter >= WECK_SCHWELLE_W). Schnee, Nebel, Dauerregen oder
+# hoher Verbrauch → keine Einspeisung → Akku schläft weiter. Ladeslot 1 läuft dann ganztags.
+# Für schnelles Wecken: zweiter cron-job.org-Job alle 15 Minuten tagsüber (siehe README).
+WINTERSCHLAF_MONATE = {11, 12, 1, 2}
+WINTER_LADEZEIT = "00:00-23:59"
+WECK_SCHWELLE_W = 50      # Einspeisung in Watt, ab der der Akku geweckt wird
+NETZ_MAX_ALTER_MIN = 15   # ältere Netzwerte gelten als unbekannt (Logger lädt alle 5 Min. hoch)
 
 # Entladegrenze (Overdischarge-SOC): Darunter entlädt der Wechselrichter den Akku nicht weiter.
 # Im Winter (Nov–Feb) 30 % als Puffer, sonst ODSOC_NORMAL.
@@ -247,7 +259,8 @@ def werte_nacht_aus(d: date, evs: list[dict], vorbei: bool = True) -> dict:
     """Fasst die Ereignisse einer Nacht zusammen. vorbei=False für die laufende Nacht."""
     ladezeit = ladezeit_aus_protokoll(evs[0]["saison"], d)
     an = next((e for e in evs if e["ereignis"] == "TOU_AN"), None)
-    aus = next((e for e in evs if e["ereignis"] == "TOU_AUS"), None)
+    aus = (next((e for e in evs if e["ereignis"] == "TOU_AUS" and "unbestätigt" not in e["info"]), None)
+           or next((e for e in evs if e["ereignis"] == "TOU_AUS"), None))
     morgen = next((e for e in evs if e["ereignis"] == "MORGEN"), None)
     hinweise, fehler = [], 0
     for e in evs:
@@ -259,14 +272,29 @@ def werte_nacht_aus(d: date, evs: list[dict], vorbei: bool = True) -> dict:
         if e["ereignis"] in ("TOU_AN", "TOU_AUS") and "unbestätigt" in e["info"]:
             hinweise.append(f"{e['zeit'][11:]} {e['ereignis'].replace('_', ' ')} unbestätigt")
 
-    if an and aus and aus["zeit"][11:] >= SPAET_AUS:
+    weck = next((e for e in evs if e["ereignis"] == "WECKEN"), None)
+    if weck:
+        hinweise.append(f"{weck['zeit'][11:]} Sonne – geweckt ({weck['info']})")
+    winter = ladezeit == WINTER_LADEZEIT
+    # Winterschlaf über mehrere Tage: Diese Nacht begann ohne neues Einschalten, weil der Akku
+    # seit der Vornacht durchschläft (Morgenlauf fand TOU an) → als fortgesetzter Schlaf zählen.
+    fort = winter and not an and morgen is not None and morgen["info"] == "TOU war an"
+    if an and aus and aus["zeit"][11:] >= SPAET_AUS and not winter:
         hinweise.append(f"TOU erst um {aus['zeit'][11:]} aus")
     if an and not aus and vorbei:
-        hinweise.append("TOU AUS nicht protokolliert")
+        hinweise.append("Winterschlaf: durchgeschlafen (keine Sonne)" if winter else "TOU AUS nicht protokolliert")
 
     schlaf = None
-    if an and not aus and not vorbei:
+    if (an or fort) and not aus and not vorbei:
         pass                     # laufende Nacht: Dauer steht erst morgens fest
+    elif winter and (an or fort):
+        # Winter (Slot ganztags): Schlaf von "TOU an" (bzw. 12 Uhr bei fortgesetztem Schlaf)
+        # bis "TOU aus" (bzw. 12 Uhr am Folgetag, wenn durchgeschlafen) – keine Doppelzählung
+        mittag = datetime.combine(d, datetime.min.time()) + timedelta(hours=12)
+        t_an = datetime.strptime(an["zeit"], "%Y-%m-%d %H:%M") if an else mittag
+        t_aus = (datetime.strptime(aus["zeit"], "%Y-%m-%d %H:%M") if aus
+                 else mittag + timedelta(days=1))
+        schlaf = max(0, int((t_aus - t_an).total_seconds() // 60))
     elif an:
         # wirksame Schlafzeit = Überschneidung von "TOU an" und Ladeslot
         von_s, bis_s = ladezeit.split("-")
@@ -276,9 +304,9 @@ def werte_nacht_aus(d: date, evs: list[dict], vorbei: bool = True) -> dict:
         t_aus = datetime.strptime(aus["zeit"], "%Y-%m-%d %H:%M") if aus else slot_bis
         schlaf = max(0, int((min(t_aus, slot_bis) - max(t_an, slot_von)).total_seconds() // 60))
     return {
-        "an": an["zeit"][11:] if an else None,
+        "an": an["zeit"][11:] if an else ("↻" if fort else None),
         "soc_an": float(an["soc"]) if an and an["soc"] else None,
-        "aus": aus["zeit"][11:] if aus else None,
+        "aus": aus["zeit"][11:] if aus else ("↻" if winter and (an or fort) and vorbei else None),
         "soc_morgen": float(morgen["soc"]) if morgen and morgen["soc"] else None,
         "schlaf": schlaf,
         "hinweise": hinweise,
@@ -388,7 +416,8 @@ def erzeuge_markdown() -> str:
         "",
         nach_oben,
         "",
-        "- **TOU**: TOU an‑aus (Uhrzeiten); – = nicht nötig, … = läuft noch, ? = Aus nicht protokolliert",
+        "- **TOU**: TOU an‑aus (Uhrzeiten); – = nicht nötig, … = läuft noch, ? = Aus nicht protokolliert, "
+        "↻ = Winterschlaf ohne Sonne, Akku schlief über den Tag weiter",
         "- **SOC→Früh**: SOC beim Einschalten → SOC beim ersten Lauf am Morgen (… = Nacht läuft noch, ? = kein Morgenwert)",
         "- **Dauer**: wirksame Schlafzeit in Stunden (TOU an *und* Ladeslot aktiv)",
         "- **💤**: Nächte, in denen die Akkus geschlafen haben",
@@ -470,9 +499,36 @@ def write_cid(cid: int, value: str, old_value: str | None = None) -> None:
             raise Fehler(f"Control fehlgeschlagen: {item.get('msg')}")
 
 
+_DETAIL: dict = {}
+
+
+def _detail() -> dict:
+    """inverterDetail – pro Lauf nur einmal abfragen (SOC und Netzwert kommen aus demselben Aufruf)."""
+    if not _DETAIL:
+        _DETAIL.update(_post("/v1/api/inverterDetail", {"sn": INVERTER_SN}) or {})
+    return _DETAIL
+
+
+def read_netz() -> tuple[float, float]:
+    """Netzleistung am Smart-Meter in W (positiv = Einspeisung, negativ = Bezug) und Alter der
+    Daten in Minuten. Nutzt das dokumentierte Feld psum (+ psumStr), sonst psumOrgin (W)."""
+    data = _detail()
+    if data.get("psum") is not None:
+        einheit = str(data.get("psumStr") or "kW").strip().lower()
+        watt = float(data["psum"]) * (1000 if einheit == "kw" else 1)
+    elif data.get("psumOrgin") is not None:
+        watt = float(data["psumOrgin"])
+    else:
+        raise Fehler("Netzwert (psum) fehlt in inverterDetail")
+    ts = data.get("dataTimestamp")
+    alter = ((datetime.now() - datetime.fromtimestamp(int(ts) / 1000)).total_seconds() / 60
+             if ts else 999.0)
+    return watt, alter
+
+
 def read_soc() -> tuple[float, str]:
     """Akku-SOC in % und Zeitpunkt der letzten Meldung des Datenloggers."""
-    data = _post("/v1/api/inverterDetail", {"sn": INVERTER_SN})
+    data = _detail()
     soc = data.get("batteryCapacitySoc")
     if soc is None:
         raise Fehler("Feld 'batteryCapacitySoc' fehlt in inverterDetail")
@@ -498,8 +554,14 @@ def plan(d: date) -> dict:
     m = MONATSPLAN[d.month]
     sommerzeit = bool(datetime(d.year, d.month, d.day, 18, tzinfo=ZEITZONE).dst())
     abend = m["abend_sz"] if sommerzeit and "abend_sz" in m else m["abend"]
-    return {"abend": abend, "soc": m["soc"], "odsoc": m.get("odsoc", ODSOC_NORMAL),
-            "ladezeit": f"{abend:02d}:{SLOT_MINUTE:02d}-{AUS_BEGINN:02d}:{SLOT_MINUTE:02d}"}
+    ladezeit = (WINTER_LADEZEIT if d.month in WINTERSCHLAF_MONATE
+                else f"{abend:02d}:{SLOT_MINUTE:02d}-{AUS_BEGINN:02d}:{SLOT_MINUTE:02d}")
+    return {"abend": abend, "soc": m["soc"], "odsoc": m.get("odsoc", ODSOC_NORMAL), "ladezeit": ladezeit}
+
+
+def winterschlaf(now: datetime) -> bool:
+    """Tagsüber in einem Wintermonat: Akku darf bis zur ersten Einspeisung weiterschlafen."""
+    return now.month in WINTERSCHLAF_MONATE and phase(now) == "aus"
 
 
 def plan_text(d: date) -> str:
@@ -526,6 +588,18 @@ def phase(now: datetime) -> str:
 
 def entscheide(now: datetime, tou_an: bool | None, soc: float | None) -> tuple[bool | None, str]:
     """(Soll-Zustand oder None = nichts tun, Begründung)."""
+    if winterschlaf(now):
+        if not tou_an:
+            return None, "Tagsüber, Akku ist wach → nichts zu tun"
+        netz = LOG.get("netz")
+        if netz is None:
+            return None, "Winterschlaf: Netzwert unbekannt → Akku schläft weiter"
+        if netz >= WECK_SCHWELLE_W:
+            return False, (f"Winterschlaf: Einspeisung {netz:.0f} W >= {WECK_SCHWELLE_W} W "
+                           "→ Sonne, Akku wecken (TOU AUS)")
+        art = (f"Einspeisung {netz:.0f} W < {WECK_SCHWELLE_W} W" if netz >= 0
+               else f"Netzbezug {-netz:.0f} W, keine Einspeisung")
+        return None, f"Winterschlaf: {art} → Akku schläft weiter"
     if phase(now) == "aus":
         heute = plan(now.date())["abend"]
         return False, f"Tagsüber (ab {AUS_BEGINN}:{SLOT_MINUTE:02d} bis {heute}:{SLOT_MINUTE:02d}) → TOU AUS, Akkus laufen normal"
@@ -818,6 +892,7 @@ def main() -> int:
     p.add_argument("--dry-run", action="store_true", help="nur anzeigen, nichts schreiben")
     a = p.parse_args()
 
+    _DETAIL.clear()
     now = datetime.now()
     print(f"--- {now:%Y-%m-%d %H:%M} · {a.command} · Nacht vom {nacht_datum(now):%d.%m.} · "
           f"Plan {plan_text(nacht_datum(now))} ---")
@@ -842,7 +917,8 @@ def main() -> int:
             print(f"::warning::Cloud-Problem, aber TOU ist bereits bestätigt AUS: {e}")
             protokolliere("WARNUNG", None, f"{CLOUD_PREFIX} (TOU war schon aus): {e}")
             return 0
-        letzte_sicherung = phase(now) == "aus" and now.hour >= LETZTE_AUS_SICHERUNG
+        letzte_sicherung = (phase(now) == "aus" and now.hour >= LETZTE_AUS_SICHERUNG
+                            and not winterschlaf(now))
         if not letzte_sicherung and not aussetzer_kurz_zuvor(now):
             # Einzelner Aussetzer: der nächste Lauf holt es nach → nur Warnung, keine E-Mail
             print(f"::warning::Cloud-Aussetzer – der nächste Lauf versucht es erneut: {e}")
@@ -905,6 +981,24 @@ def _ablauf(a, now: datetime) -> int:
                 protokolliere("FEHLER" if soc_folgefehler else "WARNUNG", None,
                               f"{CLOUD_PREFIX}: SOC nicht lesbar" + (" (zweimal in Folge)" if soc_folgefehler else ""))
     LOG["soc"] = soc
+    LOG["netz"] = None
+    netz_folgefehler = False
+    if winterschlaf(now) and tou_an:
+        try:
+            netz, alter = read_netz()
+            print(f"Netz: {netz:+.0f} W ({'Einspeisung' if netz >= 0 else 'Bezug'}), Daten {alter:.0f} Min. alt")
+            if alter <= NETZ_MAX_ALTER_MIN:
+                LOG["netz"] = netz
+            else:
+                print(f"::warning::Netzwert ist {alter:.0f} Min. alt (Datenlogger?) – Akku schläft weiter.")
+                if a.command == "auto":
+                    protokolliere("WARNUNG", None, f"Netzwert {alter:.0f} Min. alt – Datenlogger?")
+        except Fehler as e:
+            print(f"::warning::Netzwert nicht lesbar: {e}")
+            if a.command == "auto":
+                netz_folgefehler = aussetzer_kurz_zuvor(now)
+                protokolliere("FEHLER" if netz_folgefehler else "WARNUNG", None,
+                              f"{CLOUD_PREFIX}: Netzwert nicht lesbar" + (" (zweimal in Folge)" if netz_folgefehler else ""))
     if morgen_eintrag:
         protokolliere("MORGEN", soc, f"TOU war {'an' if tou_an else 'aus'}")
 
@@ -917,6 +1011,13 @@ def _ablauf(a, now: datetime) -> int:
               f"Ladeslot {n['ladezeit']} mit {LADESTROM} A")
         if h != n:
             print(f"Plan ab heute Abend: {plan_text(now.date())}, Ladeslot {h['ladezeit']}")
+        if now.month in WINTERSCHLAF_MONATE:
+            try:
+                netz, alter = read_netz()
+                print(f"Winterschlaf aktiv: Wecken ab {WECK_SCHWELLE_W} W Einspeisung; Netz jetzt "
+                      f"{netz:+.0f} W, Daten {alter:.0f} Min. alt")
+            except Fehler as e:
+                print(f"Winterschlaf aktiv; Netzwert nicht lesbar: {e}")
         if odsoc_aktiv():
             try:
                 print(f"Entladegrenze (CID {ODSOC_CID}): {read_cid(ODSOC_CID)} %, Plan ab heute Abend {h['odsoc']} %")
@@ -930,10 +1031,23 @@ def _ablauf(a, now: datetime) -> int:
             print(f"Lade-/Entladezeiten nicht lesbar: {e}")
         return 0
 
-    rc = 0
+    rc = 1 if netz_folgefehler else 0
     if soll is not None:
+        if soll is False and winterschlaf(now) and a.command == "auto":
+            protokolliere("WECKEN", soc, f"Einspeisung {LOG['netz']:.0f} W")
         ok = schalte(soll, a.dry_run)
-        if not ok and soll is False and now.hour >= LETZTE_AUS_SICHERUNG:
+        if not ok and soll is False and winterschlaf(now):
+            # Winter: Wecken nicht bestätigt → nächster Lauf (15 Min.) versucht es erneut;
+            # zweimal in Folge → Fehler + E-Mail
+            zuvor = any(e["ereignis"] == "TOU_AUS" and "unbestätigt" in e["info"]
+                        and now - datetime.strptime(e["zeit"], "%Y-%m-%d %H:%M") <= timedelta(minutes=40)
+                        and now - datetime.strptime(e["zeit"], "%Y-%m-%d %H:%M") > timedelta(minutes=1)
+                        for e in lies_ereignisse())
+            if zuvor:
+                print("FEHLER: Akku trotz Sonne zweimal nicht geweckt – bitte in der App TOU ausschalten!")
+                protokolliere("FEHLER", None, "Winterschlaf: Wecken zweimal nicht bestätigt")
+                rc = 1
+        elif not ok and soll is False and now.hour >= LETZTE_AUS_SICHERUNG:
             print("FEHLER: Letzte Aus-Sicherung – TOU ist noch AN. Bitte in der App ausschalten!")
             protokolliere("FEHLER", None, "letzte Aus-Sicherung: TOU noch AN")
             rc = 1

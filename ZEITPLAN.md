@@ -1,6 +1,6 @@
 # Zeitplan der Läufe (Ortszeit Deutschland)
 
-Gestartet wird von cron-job.org: jeden Tag zur Minute 15, von **16:15 bis 10:15 Uhr**, ganzjährig gleich und direkt in deutscher Ortszeit. GitHub braucht danach meist nur wenige Sekunden bis zum Start.
+Gestartet wird von cron-job.org: jeden Tag zur Minute 15, von **16:15 bis 10:15 Uhr**, ganzjährig gleich und direkt in deutscher Ortszeit. **November–Februar** zusätzlich alle 15 Minuten von 8:00 bis 15:45 (Winterschlaf, zweiter Job). GitHub braucht danach meist nur wenige Sekunden bis zum Start.
 
 Was ein Lauf tut, hängt vom **Abendbeginn** des Monats ab (siehe `MONATSPLAN` im Skript bzw. README):
 
@@ -14,21 +14,22 @@ Was ein Lauf tut, hängt vom **Abendbeginn** des Monats ab (siehe `MONATSPLAN` i
 | 08:15, 09:15 | Aus-Sicherung |
 | 10:15 | letzte Aus-Sicherung, **Fehler-Mail, falls TOU noch AN** |
 
+**November–Februar (Winterschlaf):** Ab 07:15 wird TOU **nicht** automatisch ausgeschaltet. Hat der Akku geschlafen, prüft jeder Lauf (07:15, dann alle 15 Min. 8:00–15:45 und stündlich :15) die Einspeisung am Smart-Meter: ≥ 50 W → **AUS** (Akku geweckt), sonst schläft er weiter. Keine Fehler-Mail „10:15 noch AN“.
+
 ## Wann der Ladeslot neu geschrieben wird
 
 Immer morgens um 07:15 für die kommende Nacht, aber nur, wenn sich der Abendbeginn ändert:
 
 | Datum | Ladeslot 1 |
 |---|---|
-| 01.01. | 17:15–07:15 |
-| 01.02. | 18:15–07:15 |
+| 01.03. | 18:15–07:15 (Ende Winterschlaf) |
 | Beginn Sommerzeit (letzter So. im März) | 19:15–07:15 |
 | 01.04. | 20:15–07:15 |
 | 01.05. | 21:15–07:15 |
 | 01.09. | 20:15–07:15 |
 | 01.10. | 19:15–07:15 |
 | Ende Sommerzeit (letzter So. im Oktober) | 17:15–07:15 |
-| 01.12. | 16:15–07:15 |
+| 01.11. | **00:00–23:59** (Winterschlaf, bis Ende Februar unverändert) |
 
 Dazu prüft jeder Morgenlauf, ob der Ladestrom noch 0,1 A beträgt. Klappt das Schreiben um 07:15 nicht, holen es die Läufe um 08:15–10:15 nach.
 
