@@ -120,6 +120,7 @@ Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der 
 - **Manuelle Läufe** (`status`, `on`, …) zeigen die volle Ausgabe. Danach bei Bedarf löschen: Lauf öffnen → „…“ → *Delete workflow run*.
 - **Zugangsdaten** erscheinen nie, sie werden immer als `***` ausgeblendet.
 - **Empfehlung:** *Settings → Actions → General → Artifact and log retention* auf **1 Tag** stellen.
+- **Aufräumen:** Der Lauf um 07:15 löscht einmal täglich alle Läufe, die älter als 30 Tage sind (`AUFBEWAHRUNG_TAGE` im Workflow, höchstens 100 pro Tag). Dafür hat der Workflow die Berechtigung `actions: write` – nur für die Läufe dieses Repos.
 
 ## Winterschlaf (November–Februar)
 

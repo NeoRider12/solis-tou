@@ -24,6 +24,7 @@ on:
 
 permissions:
   contents: read        # nur lesen; ins Protokoll-Repo schreibt der PROTOKOLL_TOKEN
+  actions: write        # nur zum Löschen alter Läufe dieses Repos (Aufräumen, letzter Schritt)
 
 # Nie zwei Läufe gleichzeitig; ein neuer wartet, bis der alte fertig ist.
 concurrency:
@@ -33,13 +34,14 @@ concurrency:
 env:
   # Privates Repository für das Protokoll: <dein Benutzername>/solis-protokoll
   # (anderer Name? → unter Settings → Variables → Actions die Variable PROTOKOLL_REPO anlegen)
+  AUFBEWAHRUNG_TAGE: 30   # Läufe älter als so viele Tage werden täglich gelöscht
   PROTOKOLL_REPO: ${{ vars.PROTOKOLL_REPO || format('{0}/solis-protokoll', github.repository_owner) }}
   HAT_PROTOKOLL: ${{ secrets.PROTOKOLL_TOKEN != '' }}
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 4          # Notbremse: hängt etwas, bricht GitHub nach 4 Min. ab (Skript selbst max. 150 s)
+    timeout-minutes: 6          # Notbremse: Skript max. 150 s + Aufräumen max. 2 Min.
     steps:
       - uses: actions/checkout@v5
 
@@ -130,3 +132,24 @@ jobs:
         if: env.HAT_PROTOKOLL == 'true' && steps.prot.outcome != 'success'
         run: echo "::warning::Protokoll-Repo ${{ env.PROTOKOLL_REPO }} nicht erreichbar – Token abgelaufen oder Repo-Name falsch? Die Steuerung lief trotzdem."
 
+      # Einmal täglich (im 7-Uhr-Lauf) Läufe löschen, die älter als AUFBEWAHRUNG_TAGE sind,
+      # höchstens 100 pro Tag. So wächst die Liste unter "Actions" nicht endlos.
+      - name: Alte Läufe aufräumen
+        if: inputs.command == 'extern'
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$(TZ=Europe/Berlin date +%H)" != "07" ]; then
+            echo "Aufräumen nur im 7-Uhr-Lauf."
+            exit 0
+          fi
+          grenze=$(date -u -d "-${AUFBEWAHRUNG_TAGE} days" +%Y-%m-%d)
+          ids=$(gh api "repos/$REPO/actions/runs?created=%3C${grenze}&per_page=100" --jq '.workflow_runs[].id')
+          n=0
+          for id in $ids; do
+            gh api -X DELETE "repos/$REPO/actions/runs/$id" >/dev/null 2>&1 && n=$((n + 1))
+          done
+          echo "$n Läufe vor dem $grenze gelöscht."
