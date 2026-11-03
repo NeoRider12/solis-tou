@@ -75,8 +75,7 @@ import requests
 #   odsoc    = Entladegrenze (Overdischarge-SOC) im Wechselrichter für diesen Monat;
 #              fehlt der Eintrag, gilt ODSOC_NORMAL. Wird nur geschrieben, wenn sie sich ändert.
 # Abendbeginn = Sonnenuntergang −1 Std., spätester Wert des Monats, auf volle Stunde aufgerundet.
-# ACHTUNG: Wird ein Abendbeginn früher als 16 Uhr gelegt, den cron-job.org-Job erweitern
-#          (er startet erst ab 16:15).
+# cron-job.org startet stündlich rund um die Uhr – Änderungen am Abendbeginn brauchen dort nichts.
 # Winterpuffer (Nov–Feb soc 30 + odsoc 30) ist derzeit AUS, weil sich der Overdischarge-SOC
 # nur am Gerät ändern lässt. Wieder aktivieren: bei 11, 12, 1, 2  "soc": 30, "odsoc": 30  eintragen.
 MONATSPLAN = {
@@ -103,7 +102,7 @@ SLOT_MINUTE = 15          # Minute für Beginn und Ende von Ladeslot 1 = Startmi
 WINTERSCHLAF_MONATE = {11, 12, 1, 2}
 WINTER_LADEZEIT = "00:00-23:59"
 WECK_SCHWELLE_W = 50      # Einspeisung in Watt, ab der der Akku geweckt wird
-NETZ_MAX_ALTER_MIN = 15   # ältere Netzwerte gelten als unbekannt (Logger lädt alle 5 Min. hoch)
+NETZ_MAX_ALTER_MIN = 20   # ältere Netzwerte gelten als unbekannt (Logger lädt alle ~5 Min. hoch)
 
 # Entladegrenze (Overdischarge-SOC): Darunter entlädt der Wechselrichter den Akku nicht weiter.
 # Im Winter (Nov–Feb) 30 % als Puffer, sonst ODSOC_NORMAL.
@@ -176,20 +175,30 @@ CLOUD_PREFIX = "Cloud-Aussetzer"
 
 
 def aussetzer_kurz_zuvor(now: datetime) -> bool:
-    """True, wenn laut Protokoll schon der vorige Lauf (innerhalb AUSSETZER_FENSTER) an der
-    Cloud gescheitert ist. Ohne Protokoll lässt sich das nicht prüfen → True (lieber melden)."""
+    """True = jetzt eine Fehler-Mail auslösen: Der vorige Lauf ist schon an der Cloud gescheitert
+    (innerhalb AUSSETZER_FENSTER) UND diese Störung wurde noch nicht gemeldet.
+    Eine Störung = lückenlose Kette von Cloud-Aussetzern (Abstand <= AUSSETZER_FENSTER) ohne
+    erfolgreichen Lauf dazwischen (erkennbar an einem anderen Protokolleintrag).
+    So gibt es pro Störung genau EINE Mail, egal wie lange sie dauert.
+    Ohne Protokoll lässt sich das nicht prüfen → True (lieber melden)."""
     if not PROTOKOLL_AKTIV:
         return True
+    zuletzt, kette, gemeldet = now, 0, False
     for e in reversed(lies_ereignisse()):
         try:
             t = datetime.strptime(e["zeit"], "%Y-%m-%d %H:%M")
         except ValueError:
             continue
-        if now - t > timedelta(minutes=AUSSETZER_FENSTER):
-            return False
-        if e["ereignis"] in ("WARNUNG", "FEHLER") and e["info"].startswith(CLOUD_PREFIX):
-            return True
-    return False
+        if zuletzt - t > timedelta(minutes=AUSSETZER_FENSTER):
+            break
+        if not (e["ereignis"] in ("WARNUNG", "FEHLER") and e["info"].startswith(CLOUD_PREFIX)):
+            break                       # erfolgreicher Lauf dazwischen → Störung war vorbei
+        kette += 1
+        gemeldet = gemeldet or e["ereignis"] == "FEHLER"
+        zuletzt = t
+    if kette and gemeldet:
+        print("Cloud-Störung dauert an – bereits per E-Mail gemeldet, daher nur Warnung.")
+    return kette > 0 and not gemeldet
 
 
 # ----------------------------- Protokoll -----------------------------------

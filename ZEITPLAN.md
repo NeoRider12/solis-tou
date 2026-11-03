@@ -1,12 +1,12 @@
 # Zeitplan der Läufe (Ortszeit Deutschland)
 
-Gestartet wird von cron-job.org: jeden Tag zur Minute 15, von **16:15 bis 10:15 Uhr**, ganzjährig gleich und direkt in deutscher Ortszeit. **November–Februar** zusätzlich alle 15 Minuten von 8:00 bis 15:45 (Winterschlaf, zweiter Job). GitHub braucht danach meist nur wenige Sekunden bis zum Start.
+Gestartet wird von cron-job.org: **stündlich zur Minute 15, rund um die Uhr**, ganzjährig gleich und direkt in deutscher Ortszeit. **November–Februar** zusätzlich zu den Minuten 0, 30 und 45 von 8 bis 15 Uhr (Winterschlaf, zweiter Job). Läufe außerhalb der Prüf- und Ausschaltzeiten lesen nur. GitHub braucht danach meist nur wenige Sekunden bis zum Start.
 
 Was ein Lauf tut, hängt vom **Abendbeginn** des Monats ab (siehe `MONATSPLAN` im Skript bzw. README):
 
 | Startzeit | Was passiert |
 |---|---|
-| 16:15 bis vor Abendbeginn | Aus-Sicherung (Tag – TOU bleibt aus) |
+| 11:15 bis vor Abendbeginn | Tag – TOU bleibt aus (nur lesen) |
 | ab Abendbeginn (z. B. Dez 16:15, Juni 21:15) | Prüfung → ggf. **EIN** |
 | stündlich bis 05:15 | Prüfung → ggf. EIN |
 | 06:15 | letzte Prüfung → ggf. EIN |
@@ -14,7 +14,7 @@ Was ein Lauf tut, hängt vom **Abendbeginn** des Monats ab (siehe `MONATSPLAN` i
 | 08:15, 09:15 | Aus-Sicherung |
 | 10:15 | letzte Aus-Sicherung, **Fehler-Mail, falls TOU noch AN** |
 
-**November–Februar (Winterschlaf):** Ab 07:15 wird TOU **nicht** automatisch ausgeschaltet. Hat der Akku geschlafen, prüft jeder Lauf (07:15, dann alle 15 Min. 8:00–15:45 und stündlich :15) die Einspeisung am Smart-Meter: ≥ 50 W → **AUS** (Akku geweckt), sonst schläft er weiter. Keine Fehler-Mail „10:15 noch AN“.
+**November–Februar (Winterschlaf):** Ab 07:15 wird TOU **nicht** automatisch ausgeschaltet. Hat der Akku geschlafen, prüft jeder Lauf (07:15, dann alle 15 Min. 8:00–15:45) die Einspeisung am Smart-Meter: ≥ 50 W → **AUS** (Akku geweckt), sonst schläft er weiter. Keine Fehler-Mail „10:15 noch AN“.
 
 ## Wann der Ladeslot neu geschrieben wird
 

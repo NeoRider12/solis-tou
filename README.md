@@ -96,7 +96,7 @@ GitHubs eigener Zeitplan (`schedule`) startet nur „nach bestem Bemühen“: of
 | Feld | Wert |
 |---|---|
 | URL | `https://api.github.com/repos/<dein-name>/<dieses-repo>/actions/workflows/solis-tou.yml/dispatches` |
-| Zeitplan | Benutzerdefiniert: Minute **15**, Stunden **16–23 und 0–10**, jeden Tag |
+| Zeitplan | `15 * * * *` – stündlich zur Minute **15**, rund um die Uhr, jeden Tag |
 | Zeitzone | **Europe/Berlin** (dann gibt es kein Sommer-/Winterzeit-Problem) |
 | Methode (Erweitert) | **POST** |
 | Header | `Authorization: Bearer <Token>` · `Accept: application/vnd.github+json` · `X-GitHub-Api-Version: 2022-11-28` · `Content-Type: application/json` |
@@ -105,13 +105,13 @@ GitHubs eigener Zeitplan (`schedule`) startet nur „nach bestem Bemühen“: of
 
 Für den Winterschlaf kommt ein **zweiter Job** dazu (siehe *Winterschlaf*).
 
-Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der Läufe heißt er dann *„Extern (cron-job.org)“*, manuelle Läufe heißen *„Manuell: …“*. Die Stunden 16–10 decken den frühesten Abendbeginn (Dezember, 16:15) ab. Läufe vor dem Abendbeginn des Monats sind nur Aus-Sicherungen. Wird ein Abendbeginn im `MONATSPLAN` früher als 16 Uhr gelegt, den Job erweitern.
+Erfolgreich ist der Aufruf, wenn GitHub mit **204** antwortet. In der Liste der Läufe heißt er dann *„Extern (cron-job.org)“*, manuelle Läufe heißen *„Manuell: …“*. Rund um die Uhr, damit es tagsüber im Winter keine Lücke gibt; Läufe außerhalb der Prüfzeiten lesen nur und tun nichts. Wird ein Abendbeginn im `MONATSPLAN` geändert, muss am Job nichts angepasst werden.
 
 **Ohne Reserve:** Fällt cron-job.org aus, läuft nichts. Deshalb die Fehler-Benachrichtigung dort einschalten. Notfalls von Hand starten (*Run workflow* → `auto` ohne Dry-Run). Bleibt TOU morgens versehentlich an, passiert tagsüber nichts (siehe *Sicherheit*).
 
 **Was kann jemand mit diesem Token?** Nur Läufe dieses Repos starten, abbrechen, löschen und deren Logs lesen – keinen Code ändern, keine Secrets lesen. Starten kann er auch `on`/`off`/`ladeslot`/`grenzen`, also nur die fest im Skript hinterlegten, sicheren Aktionen (schlimmstenfalls schlafen die Akkus eine Nacht nicht). Bei Verdacht: Token in GitHub löschen, neu erstellen, bei cron-job.org tauschen.
 
-**Actions-Minuten:** Öffentlich kostenlos. Im privaten Repo ca. 19 Läufe/Tag ≈ 590 min/Monat (frei sind 2.000).
+**Actions-Minuten:** Öffentlich kostenlos. Im privaten Repo ca. 24 Läufe/Tag (im Winter + 24 aus Job 2) ≈ 750–1.500 min/Monat (frei sind 2.000).
 
 ## Was öffentlich sichtbar ist
 
@@ -132,13 +132,13 @@ Im Winter steht der Akku morgens oft leer an der Entladegrenze – er kann dann 
   - Keine oder weniger Einspeisung (Schnee, Nebel, Dauerregen, Ofen/Trockner laufen) → Akku **schläft weiter** – er könnte ohnehin nichts laden.
 - Ein wacher Akku schluckt den Überschuss selbst, die Einspeisung geht dann gegen 0 – tagsüber wird er deshalb **nicht erneut** schlafen gelegt. Abends gilt wieder die normale SOC-Prüfung.
 - Schneetage: Der Akku schläft durch bis zur nächsten Sonne, auch über mehrere Tage (Protokoll: ↻).
-- **Sicherheit:** Netzwerte älter als 15 Minuten (`NETZ_MAX_ALTER_MIN`) gelten als unbekannt → Akku schläft weiter. Wecken zweimal in Folge nicht bestätigt → Fehler + E-Mail. Die Aus-Sicherung „10 Uhr noch AN“ entfällt in diesen Monaten.
+- **Sicherheit:** Netzwerte älter als 20 Minuten (`NETZ_MAX_ALTER_MIN`) gelten als unbekannt → Akku schläft weiter. Wecken zweimal in Folge nicht bestätigt → Fehler + E-Mail. Die Aus-Sicherung „10 Uhr noch AN“ entfällt in diesen Monaten.
 - **Zweiter cron-job.org-Job** für schnelles Wecken (sonst bis zu 1 Std. Verzögerung): gleiche Einstellungen wie der Hauptjob (einfach klonen), Zeitplan
 
   ```
-  0,15,30,45 8-15 * 1,2,11,12 *
+  0,30,45 8-15 * 1,2,11,12 *
   ```
-  (alle 15 Minuten 8:00–15:45, Jan/Feb/Nov/Dez). Um 8:15–10:15 starten beide Jobs gleichzeitig – harmlos, der zweite Lauf wartet und findet nichts mehr zu tun. Reaktionszeit dann ≤ ca. 20 Min. (15 Min. Takt + bis 5 Min. Datenverzug des Loggers).
+  (Minuten 0, 30, 45, Stunden 8–15, Jan/Feb/Nov/Dez – die :15 macht der Hauptjob, so laufen nie zwei Jobs gleichzeitig). Reaktionszeit dann ≤ ca. 20 Min. (15 Min. Takt + bis 5 Min. Datenverzug des Loggers).
 
 ## Entladegrenze im Winter (optional, derzeit aus)
 
@@ -207,6 +207,7 @@ So funktioniert es:
   - Die API lehnt einen Schreibbefehl ab.
   - Die Cloud ist **zweimal in Folge** nicht erreichbar oder der SOC zweimal in Folge nicht lesbar.
   - Die letzte Aus-Sicherung am Vormittag findet TOU noch AN vor (oder kann es wegen der Cloud nicht prüfen, obwohl TOU nicht bestätigt aus ist).
+- **Eine Mail pro Störung:** Dauert eine Cloud-Störung länger, kommt nur beim zweiten Aussetzer in Folge eine Mail; weitere Aussetzer derselben Störung sind nur Warnungen. Nach einem erfolgreichen Lauf kann die nächste Störung wieder melden.
 - **Kein Alarm bei einzelnen Cloud-Aussetzern:** Ein einzelner gescheiterter Lauf ergibt nur eine gelbe Warnung und einen Hinweis im Protokoll – der nächste Lauf holt es nach. Ohne Protokoll-Repo wird jeder Aussetzer gemeldet (dann fehlt das Gedächtnis).
 - Fällt das Ausschalten am Morgen komplett aus, passiert tagsüber nichts: Außerhalb des Ladeslots arbeitet der Wechselrichter trotz TOU normal im Self-Use.
 - Notfall: unter *Actions → Run workflow* `off` ohne Dry-Run wählen. Oder in der Solis-App TOU ausschalten.
