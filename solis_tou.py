@@ -139,6 +139,9 @@ MONATS_UEBERSICHT = 60    # so viele Monate zeigt die Monatsübersicht (CSV beh�
 
 MAX_LAUFZEIT = 150        # Sekunden: danach bricht das Skript ab (normale Läufe brauchen 10–60 s)
 WIEDERHOL_PAUSEN = (10, 30)  # Sekunden Pause vor dem 2. und 3. Versuch, wenn die Cloud hakt
+# Antwortzeit je Endpunkt in Sekunden. atRead fragt vermutlich live beim Wechselrichter nach
+# (über Datenlogger) und ist daher langsamer als die zwischengespeicherten Messwerte.
+TIMEOUT = {"/v2/api/atRead": 30, "/v2/api/control": 30}
 AUSSETZER_FENSTER = 75    # Minuten: zwei Cloud-Aussetzer innerhalb dieser Zeit = Fehler + E-Mail
 
 # ===========================================================================
@@ -477,7 +480,7 @@ def _post(endpoint: str, payload: dict) -> object:
         try:
             r = requests.post(BASE_URL + endpoint, data=body,
                               headers=_headers(endpoint, body),
-                              timeout=min(15, max(3, restzeit())))
+                              timeout=min(TIMEOUT.get(endpoint, 15), max(3, restzeit())))
             r.raise_for_status()
             js = r.json()
             if str(js.get("code")) != "0":
