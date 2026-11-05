@@ -79,8 +79,8 @@ import requests
 # Winterpuffer (Nov–Feb soc 30 + odsoc 30) ist derzeit AUS, weil sich der Overdischarge-SOC
 # nur am Gerät ändern lässt. Wieder aktivieren: bei 11, 12, 1, 2  "soc": 30, "odsoc": 30  eintragen.
 MONATSPLAN = {
-    1:  {"abend": 17, "soc": 15},
-    2:  {"abend": 18, "soc": 15},
+    1:  {"abend": 17, "soc": 30},
+    2:  {"abend": 18, "soc": 30},
     3:  {"abend": 18, "abend_sz": 19, "soc": 15},
     4:  {"abend": 20, "soc": 15},
     5:  {"abend": 21, "soc": 15},
@@ -89,8 +89,8 @@ MONATSPLAN = {
     8:  {"abend": 21, "soc": 15},
     9:  {"abend": 20, "soc": 15},
     10: {"abend": 17, "abend_sz": 19, "soc": 15},
-    11: {"abend": 17, "soc": 15},
-    12: {"abend": 16, "soc": 15},
+    11: {"abend": 17, "soc": 30},
+    12: {"abend": 16, "soc": 30},
 }
 LADESTROM = "0.1"         # Ladestrom von Slot 1 in A (lässt die Pylontech-BMS schlafen)
 SLOT_MINUTE = 15          # Minute für Beginn und Ende von Ladeslot 1 = Startminute bei cron-job.org
