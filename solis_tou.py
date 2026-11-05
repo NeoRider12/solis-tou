@@ -323,6 +323,9 @@ def werte_nacht_aus(d: date, evs: list[dict], vorbei: bool = True) -> dict:
         "schlaf": schlaf,
         "hinweise": hinweise,
         "fehler": fehler,
+        # ✓ statt ⚠: im Winter von der Sonne geweckt und keine Probleme (Fehler, Warnung, unbestätigt)
+        "geweckt": weck is not None,
+        "probleme": fehler > 0 or any(e["ereignis"] == "WARNUNG" or "unbestätigt" in e["info"] for e in evs),
         "vorbei": vorbei,
     }
 
@@ -373,7 +376,7 @@ def erzeuge_markdown() -> str:
                 tag,
                 # Ein- und Ausschaltzeit mit geschütztem Bindestrich (U+2011) → kein Zeilenumbruch
                 (f"{n['an']}\u2011{n['aus'] or ('…' if n['schlaf'] is None else '?')}" if n["an"] else "–"),
-                _soc_paar(n) + ("⚠" if n["hinweise"] else ""),
+                _soc_paar(n) + ("✓" if n["geweckt"] and not n["probleme"] else "⚠" if n["hinweise"] else ""),
                 "läuft" if n["an"] and n["schlaf"] is None else (_dauer(n["schlaf"]) if n["an"] else "∞"),
             ]) + " |")
         d -= timedelta(days=1)
@@ -435,6 +438,7 @@ def erzeuge_markdown() -> str:
         "- **💤**: Nächte, in denen die Akkus geschlafen haben",
         "- **∞**: Akkus liefen durch (TOU blieb aus); in den Übersichten: Anzahl solcher Nächte",
         "- **⚠**: Hinweis vorhanden (Fehler, manuelle Schaltung, Ladeslot-Wechsel), siehe [Hinweise](#hinweise)",
+        "- **✓**: Winterschlaf – von der Sonne geweckt, ohne Probleme (bei Fehlern/Warnungen stattdessen ⚠)",
         "- **k. D.**: keine Daten für diese Nacht",
         "- Eine Nacht zählt zu dem Tag bzw. Monat, an dem sie beginnt.",
         "",
