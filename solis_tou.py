@@ -76,8 +76,9 @@ import requests
 #              fehlt der Eintrag, gilt ODSOC_NORMAL. Wird nur geschrieben, wenn sie sich ändert.
 # Abendbeginn = Sonnenuntergang −1 Std., spätester Wert des Monats, auf volle Stunde aufgerundet.
 # cron-job.org startet stündlich rund um die Uhr – Änderungen am Abendbeginn brauchen dort nichts.
-# Winterpuffer (Nov–Feb soc 30 + odsoc 30) ist derzeit AUS, weil sich der Overdischarge-SOC
-# nur am Gerät ändern lässt. Wieder aktivieren: bei 11, 12, 1, 2  "soc": 30, "odsoc": 30  eintragen.
+# Nov–Feb: Schwelle 30 % (Akku schläft früher ein und hungert nicht bei 15 %). Die Entladegrenze
+# bleibt bei 15 % – sie lässt sich nur am Gerät ändern, und der Winterschlaf hält den Akku ohnehin
+# bis zur ersten Sonne im Schlaf. Optional zusätzlich "odsoc": 30 (dann am Gerät einstellen).
 MONATSPLAN = {
     1:  {"abend": 17, "soc": 30},
     2:  {"abend": 18, "soc": 30},
