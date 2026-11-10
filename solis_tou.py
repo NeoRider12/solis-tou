@@ -363,11 +363,19 @@ def erzeuge_markdown() -> str:
 
     # Detailtabelle der letzten Nächte (schmal, damit sie aufs Handy im Hochformat passt)
     zeilen, im_zeitraum, hinweis_zeilen = [], [], []
+    # Ab 0:00 steht der heutige Tag schon oben – mit der Uhrzeit des ersten Abendchecks,
+    # solange für die kommende Nacht noch nichts passiert ist (Nacht beginnt am Abend).
+    heute = datetime.now().date()
+    chk = f"| {heute:%d.%m.} | Chk→{plan(heute)['abend']}:{SLOT_MINUTE:02d} | | |"
+    if heute > ende:
+        zeilen.append(chk)
     d = ende
     while d >= start:
         tag = f"{d:%d.%m.}"
         n = auswertung.get(d)
-        if n is None:
+        if n is None and d == heute:
+            zeilen.append(chk)
+        elif n is None:
             zeilen.append(f"| {tag} | | | k. D. |")
         else:
             im_zeitraum.append(n)
@@ -433,7 +441,8 @@ def erzeuge_markdown() -> str:
         nach_oben,
         "",
         "- **TOU**: TOU an‑aus (Uhrzeiten); – = nicht nötig, … = läuft noch, ? = Aus nicht protokolliert, "
-        "↻ = Winterschlaf ohne Sonne, Akku schlief über den Tag weiter",
+        "↻ = Winterschlaf ohne Sonne, Akku schlief über den Tag weiter, "
+        "Chk→17:15 = Nacht dieses Tages beginnt mit dem Abendcheck um diese Uhrzeit",
         "- **SOC→Früh**: SOC beim Einschalten → SOC beim ersten Lauf am Morgen (… = Nacht läuft noch, ? = kein Morgenwert)",
         "- **Dauer**: wirksame Schlafzeit in Stunden (TOU an *und* Ladeslot aktiv)",
         "- **💤**: Nächte, in denen die Akkus geschlafen haben",
