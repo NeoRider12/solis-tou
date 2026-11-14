@@ -301,12 +301,14 @@ def werte_nacht_aus(d: date, evs: list[dict], vorbei: bool = True) -> dict:
     if (an or fort) and not aus and not vorbei:
         pass                     # laufende Nacht: Dauer steht erst morgens fest
     elif winter and (an or fort):
-        # Winter (Slot ganztags): Schlaf von "TOU an" (bzw. 12 Uhr bei fortgesetztem Schlaf)
-        # bis "TOU aus" (bzw. 12 Uhr am Folgetag, wenn durchgeschlafen) – keine Doppelzählung
-        mittag = datetime.combine(d, datetime.min.time()) + timedelta(hours=12)
-        t_an = datetime.strptime(an["zeit"], "%Y-%m-%d %H:%M") if an else mittag
+        # Winter (Slot ganztags): Schlaf von "TOU an" (bzw. Abendbeginn bei fortgesetztem Schlaf)
+        # bis "TOU aus" (bzw. Abendbeginn am Folgetag, wenn durchgeschlafen) – keine Doppelzählung
+        def abendbeginn(tag: date) -> datetime:
+            return datetime.combine(tag, datetime.min.time()) + timedelta(
+                hours=plan(tag)["abend"], minutes=SLOT_MINUTE)
+        t_an = datetime.strptime(an["zeit"], "%Y-%m-%d %H:%M") if an else abendbeginn(d)
         t_aus = (datetime.strptime(aus["zeit"], "%Y-%m-%d %H:%M") if aus
-                 else mittag + timedelta(days=1))
+                 else abendbeginn(d + timedelta(days=1)))
         schlaf = max(0, int((t_aus - t_an).total_seconds() // 60))
     elif an:
         # wirksame Schlafzeit = Überschneidung von "TOU an" und Ladeslot
@@ -331,6 +333,15 @@ def werte_nacht_aus(d: date, evs: list[dict], vorbei: bool = True) -> dict:
     }
 
 
+def _markierung(n: dict) -> str:
+    """✓ = von der Sonne geweckt ohne Probleme; nichts = nur durchgeschlafen (Winterschlaf);
+    ⚠ = sonstige Hinweise (Fehler, Warnungen, Ladeslot …)."""
+    if n["geweckt"] and not n["probleme"]:
+        return "✓"
+    relevant = [h for h in n["hinweise"] if not h.startswith("Winterschlaf: durchgeschlafen")]
+    return "⚠" if relevant else ""
+
+
 def _soc_paar(n: dict) -> str:
     """'15→13%' (SOC beim Einschalten → SOC morgens); ohne Einschalten nur '→44%'."""
     an = f"{n['soc_an']:.0f}" if n["soc_an"] is not None else ""
@@ -353,7 +364,13 @@ def erzeuge_markdown() -> str:
     """Erzeugt PROTOKOLL.md (letzte PROTOKOLL_TAGE Nächte + Monatsübersicht) und gibt den Text zurück."""
     nach_nacht: dict[date, list[dict]] = {}
     for e in lies_ereignisse():
-        nach_nacht.setdefault(date.fromisoformat(e["nacht"]), []).append(e)
+        # Nacht aus der Uhrzeit bestimmen (nicht aus der gespeicherten Spalte), damit auch ältere
+        # Einträge nach der aktuellen Regel (Nacht bis zum nächsten Abendbeginn) einsortiert werden
+        try:
+            nacht = nacht_datum(datetime.strptime(e["zeit"], "%Y-%m-%d %H:%M"))
+        except ValueError:
+            nacht = date.fromisoformat(e["nacht"])
+        nach_nacht.setdefault(nacht, []).append(e)
     laufend = nacht_datum(datetime.now())
     auswertung = {d: werte_nacht_aus(d, evs, vorbei=d < laufend) for d, evs in nach_nacht.items()}
 
@@ -385,7 +402,7 @@ def erzeuge_markdown() -> str:
                 tag,
                 # Ein- und Ausschaltzeit mit geschütztem Bindestrich (U+2011) → kein Zeilenumbruch
                 (f"{n['an']}\u2011{n['aus'] or ('…' if n['schlaf'] is None else '?')}" if n["an"] else "–"),
-                _soc_paar(n) + ("✓" if n["geweckt"] and not n["probleme"] else "⚠" if n["hinweise"] else ""),
+                _soc_paar(n) + _markierung(n),
                 "läuft" if n["an"] and n["schlaf"] is None else (_dauer(n["schlaf"]) if n["an"] else "∞"),
             ]) + " |")
         d -= timedelta(days=1)
@@ -447,10 +464,12 @@ def erzeuge_markdown() -> str:
         "- **Dauer**: wirksame Schlafzeit in Stunden (TOU an *und* Ladeslot aktiv)",
         "- **💤**: Nächte, in denen die Akkus geschlafen haben",
         "- **∞**: Akkus liefen durch (TOU blieb aus); in den Übersichten: Anzahl solcher Nächte",
-        "- **⚠**: Hinweis vorhanden (Fehler, manuelle Schaltung, Ladeslot-Wechsel), siehe [Hinweise](#hinweise)",
+        "- **⚠**: Hinweis vorhanden (Fehler, manuelle Schaltung, Ladeslot-Wechsel), siehe [Hinweise](#hinweise); "
+        "ohne Symbol bei ↻ = Winterschlaf ohne Sonne durchgeschlafen, alles in Ordnung",
         "- **✓**: Winterschlaf – von der Sonne geweckt, ohne Probleme (bei Fehlern/Warnungen stattdessen ⚠)",
         "- **k. D.**: keine Daten für diese Nacht",
-        "- Eine Nacht zählt zu dem Tag bzw. Monat, an dem sie beginnt.",
+        "- Eine Nacht zählt zu dem Tag bzw. Monat, an dem sie beginnt, und dauert bis zum nächsten Abendbeginn "
+        "(z. B. 17:15) – auch ein Wecken am Nachmittag gehört noch zur Nacht davor.",
         "",
         "Rohdaten: [`protokoll/ereignisse.csv`](protokoll/ereignisse.csv)",
         "",
@@ -570,9 +589,10 @@ def decode(mode: int) -> str:
 
 
 def nacht_datum(now: datetime) -> date:
-    """Eine Nacht gehört zum Tag, an dem sie abends beginnt.
-    Vormittags (vor 12 Uhr) zählt also noch der Vortag."""
-    return (now - timedelta(days=1)).date() if now.hour < 12 else now.date()
+    """Eine Nacht gehört zum Tag, an dem sie abends beginnt – und dauert bis zum nächsten
+    Abendbeginn (z. B. 17:15). Alles davor, auch ein Wecken am Nachmittag im Winterschlaf,
+    zählt noch zur Nacht vom Vortag."""
+    return now.date() if now.hour >= plan(now.date())["abend"] else (now - timedelta(days=1)).date()
 
 
 def plan(d: date) -> dict:
@@ -607,7 +627,7 @@ def ladezeit_aus_protokoll(wert: str, d: date) -> str:
 
 def phase(now: datetime) -> str:
     h = now.hour
-    if h >= plan(nacht_datum(now))["abend"] or h <= PRUEF_ENDE:
+    if h >= plan(now.date())["abend"] or h <= PRUEF_ENDE:
         return "pruefen"
     return "aus"
 
