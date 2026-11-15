@@ -322,7 +322,9 @@ def werte_nacht_aus(d: date, evs: list[dict], vorbei: bool = True) -> dict:
         "an": an["zeit"][11:] if an else ("↻" if fort else None),
         "soc_an": float(an["soc"]) if an and an["soc"] else None,
         "aus": aus["zeit"][11:] if aus else ("↻" if winter and (an or fort) and vorbei else None),
-        "soc_morgen": float(morgen["soc"]) if morgen and morgen["soc"] else None,
+        # SOC beim Aufwachen (TOU aus); sonst der erste Morgenlauf
+        "soc_morgen": (float(aus["soc"]) if aus and aus["soc"]
+                       else float(morgen["soc"]) if morgen and morgen["soc"] else None),
         "schlaf": schlaf,
         "hinweise": hinweise,
         "fehler": fehler,
@@ -364,12 +366,14 @@ def erzeuge_markdown() -> str:
     """Erzeugt PROTOKOLL.md (letzte PROTOKOLL_TAGE Nächte + Monatsübersicht) und gibt den Text zurück."""
     nach_nacht: dict[date, list[dict]] = {}
     for e in lies_ereignisse():
-        # Nacht aus der Uhrzeit bestimmen (nicht aus der gespeicherten Spalte), damit auch ältere
-        # Einträge nach der aktuellen Regel (Nacht bis zum nächsten Abendbeginn) einsortiert werden
-        try:
-            nacht = nacht_datum(datetime.strptime(e["zeit"], "%Y-%m-%d %H:%M"))
-        except ValueError:
-            nacht = date.fromisoformat(e["nacht"])
+        nacht = date.fromisoformat(e["nacht"])
+        if e["ereignis"] in ("WECKEN", "TOU_AUS", "MORGEN"):
+            # Ende einer Nacht: vor dem Abendbeginn gehört es zur Nacht davor (ältere Einträge
+            # wurden noch mit der 12-Uhr-Grenze gespeichert). Alles andere bleibt, wie gespeichert.
+            try:
+                nacht = min(nacht, nacht_datum(datetime.strptime(e["zeit"], "%Y-%m-%d %H:%M")))
+            except ValueError:
+                pass
         nach_nacht.setdefault(nacht, []).append(e)
     laufend = nacht_datum(datetime.now())
     auswertung = {d: werte_nacht_aus(d, evs, vorbei=d < laufend) for d, evs in nach_nacht.items()}
@@ -460,7 +464,8 @@ def erzeuge_markdown() -> str:
         "- **TOU**: TOU an‑aus (Uhrzeiten); – = nicht nötig, … = läuft noch, ? = Aus nicht protokolliert, "
         "↻ = Winterschlaf ohne Sonne, Akku schlief über den Tag weiter, "
         "Chk→17:15 = Nacht dieses Tages beginnt mit dem Abendcheck um diese Uhrzeit",
-        "- **SOC→Früh**: SOC beim Einschalten → SOC beim ersten Lauf am Morgen (… = Nacht läuft noch, ? = kein Morgenwert)",
+        "- **SOC→Früh**: SOC beim Einschalten → SOC beim Aufwachen (TOU aus; sonst erster Lauf am Morgen) "
+        "(… = Nacht läuft noch, ? = kein Wert)",
         "- **Dauer**: wirksame Schlafzeit in Stunden (TOU an *und* Ladeslot aktiv)",
         "- **💤**: Nächte, in denen die Akkus geschlafen haben",
         "- **∞**: Akkus liefen durch (TOU blieb aus); in den Übersichten: Anzahl solcher Nächte",
@@ -1032,6 +1037,11 @@ def _ablauf(a, now: datetime) -> int:
     if winterschlaf(now) and tou_an:
         try:
             netz, alter = read_netz()
+            if LOG["soc"] is None:
+                try:
+                    LOG["soc"] = read_soc()[0]     # gleicher inverterDetail-Aufruf, kein Extra-Request
+                except Fehler:
+                    pass
             print(f"Netz: {netz:+.0f} W ({'Einspeisung' if netz >= 0 else 'Bezug'}), Daten {alter:.0f} Min. alt")
             if alter <= NETZ_MAX_ALTER_MIN:
                 LOG["netz"] = netz
@@ -1080,7 +1090,7 @@ def _ablauf(a, now: datetime) -> int:
     rc = 1 if netz_folgefehler else 0
     if soll is not None:
         if soll is False and winterschlaf(now) and a.command == "auto":
-            protokolliere("WECKEN", soc, f"Einspeisung {LOG['netz']:.0f} W")
+            protokolliere("WECKEN", LOG["soc"], f"Einspeisung {LOG['netz']:.0f} W")
         ok = schalte(soll, a.dry_run)
         if not ok and soll is False and winterschlaf(now):
             # Winter: Wecken nicht bestätigt → nächster Lauf (15 Min.) versucht es erneut;
