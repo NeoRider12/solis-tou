@@ -437,7 +437,7 @@ def erzeuge_markdown() -> str:
         "|---|---|---|---|---|",
         f"| {k[0]} | {k[1]} | {k[2]} | {k[3]} | {k[4]} |",
         "",
-        "| Nacht | TOU | SOC→Früh | Dauer |",
+        "| Nacht | TOU | SOC 1→0 | Dauer |",
         "|---|---|---|---|",
         *zeilen,
         "",
@@ -464,7 +464,7 @@ def erzeuge_markdown() -> str:
         "- **TOU**: TOU an‑aus (Uhrzeiten); – = nicht nötig, … = läuft noch, ? = Aus nicht protokolliert, "
         "↻ = Winterschlaf ohne Sonne, Akku schlief über den Tag weiter, "
         "Chk→17:15 = Nacht dieses Tages beginnt mit dem Abendcheck um diese Uhrzeit",
-        "- **SOC→Früh**: SOC beim Einschalten → SOC beim Aufwachen (TOU aus; sonst erster Lauf am Morgen) "
+        "- **SOC 1→0**: SOC beim Einschalten (TOU 1) → SOC beim Aufwachen (TOU 0; sonst erster Lauf am Morgen) "
         "(… = Nacht läuft noch, ? = kein Wert)",
         "- **Dauer**: wirksame Schlafzeit in Stunden (TOU an *und* Ladeslot aktiv)",
         "- **💤**: Nächte, in denen die Akkus geschlafen haben",
