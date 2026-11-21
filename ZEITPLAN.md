@@ -31,7 +31,7 @@ Immer morgens um 07:15 für die kommende Nacht, aber nur, wenn sich der Abendbeg
 | Ende Sommerzeit (letzter So. im Oktober) | 17:15–07:15 |
 | 01.11. | **00:00–23:59** (Winterschlaf, bis Ende Februar unverändert) |
 
-Dazu prüft jeder Morgenlauf, ob der Ladestrom noch 0,1 A beträgt. Klappt das Schreiben um 07:15 nicht, holen es die Läufe um 08:15–10:15 nach.
+Geprüft wird nur noch um **07:15** (Zeit und Ladestrom 0,1 A), mit **10:15** als Reserve, falls die Cloud morgens hakt. Andere Läufe lesen den Ladeslot nicht mehr.
 
 ## Legende
 

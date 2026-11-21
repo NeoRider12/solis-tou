@@ -131,6 +131,7 @@ PRUEF_ENDE = 6            # letzte Prüfung in der Stunde 06:00–06:59
 AUS_BEGINN = 7            # ab 07:00 Uhr wird TOU ausgeschaltet (bis zur nächsten Prüfphase)
 LETZTE_AUS_SICHERUNG = 10 # ab diesem Lauf: TOU noch AN → Fehler + E-Mail
 LADESLOT_ABGLEICH = True  # morgens Ladeslot 1 automatisch auf den Plan der kommenden Nacht setzen
+ABGLEICH_STUNDEN = (7, 10)  # Läufe um 07:15 und 10:15 (Reserve) gleichen den Ladeslot ab
 
 # Nach dem Schreiben zurücklesen und bestätigen? (False = nur schreiben)
 RUECKLESEN = True
@@ -1112,7 +1113,10 @@ def _ablauf(a, now: datetime) -> int:
     elif soc_folgefehler:
         rc = 1   # SOC zweimal in Folge nicht lesbar → roter Lauf + E-Mail
 
-    if LADESLOT_ABGLEICH and phase(now) == "aus":
+    # Ladeslot nur noch um 07:15 abgleichen (+ 10:15 als Reserve, falls die Cloud morgens hakt) –
+    # spart viele atRead-Abfragen; der Slot ändert sich ohnehin nur ein paar Mal im Jahr.
+    abgleich_jetzt = now.hour in ABGLEICH_STUNDEN and 10 <= now.minute < 30
+    if LADESLOT_ABGLEICH and phase(now) == "aus" and (abgleich_jetzt or a.command != "auto"):
         try:
             if not ladeslot_abgleich(now, a.dry_run):
                 rc = 1
