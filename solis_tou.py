@@ -111,7 +111,9 @@ NETZ_MAX_ALTER_MIN = 20   # ältere Netzwerte gelten als unbekannt (Logger lädt
 # CID den Wert aus der Solis-App zeigt, bevor ODSOC_STEUERN = True gesetzt wird.
 # Schwelle (soc) und Entladegrenze (odsoc) bewusst IDENTISCH halten: Der Akku entlädt bis zur
 # Grenze, schläft dort ein und bleibt nach dem Ausschalten morgens sparsam im Standby.
-ODSOC_STEUERN = True
+# AUS: Die Entladegrenze steht fest auf 15 % und lässt sich beim RAI-3K-48ES-5G nicht per API ändern.
+# Ohne Prüfung entfallen die vielen atRead-Abfragen (CID 158) und deren Timeout-Warnungen.
+ODSOC_STEUERN = False
 # Beim RAI-3K-48ES-5G lässt sich der Overdischarge-SOC NICHT aus der Ferne ändern (App/Web/API
 # melden 'Datenlogger offline', TOU und Force-Charge-SOC gehen). Daher nur prüfen und erinnern:
 # Weicht der Wert vom Plan ab, gibt es morgens EINE Fehler-Mail pro Tag ('bitte am Gerät einstellen').
@@ -1080,7 +1082,7 @@ def _ablauf(a, now: datetime) -> int:
             except Fehler as e:
                 print(f"Entladegrenze nicht lesbar: {e}")
         else:
-            print("Entladegrenze: Steuerung aus (erst CID mit 'grenzen' prüfen, dann ODSOC_STEUERN = True)")
+            print("Entladegrenze: wird nicht geprüft (ODSOC_STEUERN = False; manuell lesen mit 'grenzen')")
         try:
             print(f"Lade-/Entladezeiten (CID {CID_CHARGE_DISCHARGE}): {read_cid(CID_CHARGE_DISCHARGE)}")
         except Fehler as e:

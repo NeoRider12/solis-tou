@@ -150,7 +150,8 @@ Im Winter reicht die Sonne selten, um die Akkus voll zu laden. Damit sie nicht w
 - Geräte, die das Schreiben zulassen: `ODSOC_SCHREIBEN = True` → 2 Schreibvorgänge im Jahr (1. November und 1. März, jeweils morgens).
 - **Kontrolle:** Nach dem Schreiben wird zweimal zurückgelesen (nach 15 und 30 s). Jeder Morgenlauf vergleicht den Wert mit dem Plan (nur lesen).
 - **Sperre:** Bleibt ein Schreibversuch unbestätigt (Cloud nimmt an, Wechselrichter übernimmt nicht – z. B. Datenlogger offline), gibt es **Fehler + E-Mail** und **höchstens einen Versuch pro Tag**; der nächste folgt am nächsten Morgen. Dasselbe gilt für den Ladeslot. Der manuelle Befehl `ladeslot` umgeht die Sperre.
-- **CID:** Beim RAI-3K-48ES-5G ist es **CID 158** (157 = Reserve-/Backup-SOC, 160 = Force-Charge-SOC), die Steuerung ist eingeschaltet. **Bei anderen Geräten** vorher prüfen und ggf. `ODSOC_STEUERN = False` setzen:
+- **Derzeit ausgeschaltet** (`ODSOC_STEUERN = False`): Beim RAI-3K-48ES-5G steht die Entladegrenze fest auf 15 % und lässt sich nicht per API ändern – die Prüfung brachte nur zusätzliche Cloud-Abfragen und Timeout-Warnungen. Manuell lesen geht weiterhin mit `grenzen`.
+- **CID:** Beim RAI-3K-48ES-5G ist es **CID 158** (157 = Reserve-/Backup-SOC, 160 = Force-Charge-SOC). **Zum Einschalten** bzw. bei anderen Geräten:
   1. *Run workflow* → `grenzen` starten. Das liest drei Kandidaten (CID 157, 158, 160) nur aus.
   2. Die Werte mit der Solis-App vergleichen: Welche CID zeigt den Overdischarge-SOC? (Sicherheitshalber den Wert in der App kurz testweise ändern und `grenzen` erneut starten.)
   3. Im Skript `ODSOC_CID` eintragen, `ODSOC_NORMAL` prüfen (Normalwert, hier 15 %) und `ODSOC_STEUERN = True`.
@@ -168,7 +169,7 @@ MONATSPLAN = {
     12: {"abend": 16, "soc": 15},
 }
 LADESTROM = "0.1"         # Ladestrom von Slot 1 in A
-ODSOC_STEUERN = True      # Entladegrenze steuern (andere Geräte: erst mit "grenzen" prüfen)
+ODSOC_STEUERN = False     # Entladegrenze prüfen/steuern (aus: fest 15 %, nicht per API änderbar)
 ODSOC_CID = 158           # CID des Overdischarge-SOC (RAI-3K-48ES-5G)
 ODSOC_NORMAL = 15         # Entladegrenze außerhalb des Winters
 PRUEF_ENDE = 6            # letzte Prüfung 06:00–06:59
