@@ -430,7 +430,7 @@ def erzeuge_markdown() -> str:
         "",
         f"Stand {datetime.now():%d.%m.%Y %H:%M} · automatisch erzeugt",
         "",
-        "Springen zu: [Hinweise](#hinweise) · [Monate](#monate) · [Legende](#legende)",
+        "Springen zu: [Hinweise](#hinweise-zur-nacht-datum) · [Monate](#monate) · [Legende](#legende)",
         "",
         "## Nächte",
         "",
@@ -444,7 +444,7 @@ def erzeuge_markdown() -> str:
         "|---|---|---|---|",
         *zeilen,
         "",
-        "## Hinweise",
+        "## Hinweise zur Nacht (Datum)",
         "",
         nach_oben,
         "",
@@ -472,7 +472,7 @@ def erzeuge_markdown() -> str:
         "- **Dauer**: wirksame Schlafzeit in Stunden (TOU an *und* Ladeslot aktiv)",
         "- **💤**: Nächte, in denen die Akkus geschlafen haben",
         "- **∞**: Akkus liefen durch (TOU blieb aus); in den Übersichten: Anzahl solcher Nächte",
-        "- **⚠**: Hinweis vorhanden (Fehler, manuelle Schaltung, Ladeslot-Wechsel), siehe [Hinweise](#hinweise); "
+        "- **⚠**: Hinweis vorhanden (Fehler, manuelle Schaltung, Ladeslot-Wechsel), siehe [Hinweise](#hinweise-zur-nacht-datum); "
         "ohne Symbol bei ↻ = Winterschlaf ohne Sonne durchgeschlafen, alles in Ordnung",
         "- **✓**: Winterschlaf – von der Sonne geweckt, ohne Probleme (bei Fehlern/Warnungen stattdessen ⚠)",
         "- **k. D.**: keine Daten für diese Nacht",
