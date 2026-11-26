@@ -24,7 +24,7 @@ Im Wechselrichter ist ein **Ladeslot mit 0,1 A** eingestellt. Ist TOU an, lädt 
 | November | 17:15 |
 | Dezember | 16:15 |
 
-TOU an bei **SOC ≤ 30 % von November bis Februar**, sonst **≤ 15 %** (je Monat änderbar, kostet keine Schreibvorgänge). Im Winter schläft der Akku so schon bei 30 % ein und bleibt dank Winterschlaf bis zur ersten Sonne im Schlaf – auch ohne die Entladegrenze anzufassen. Ladeslot 1 läuft vom Abendbeginn bis **07:15** mit **0,1 A** – Beginn und Ende liegen genau auf den Startzeiten bei cron-job.org (Minute 15, `SLOT_MINUTE`). TOU aus ab 07:15, Aus-Sicherungen bis 10 Uhr. **Ausnahme November–Februar:** Winterschlaf, siehe unten.
+TOU an bei **SOC ≤ 30 % von November bis Februar**, sonst **≤ 15 %** (je Monat änderbar, kostet keine Schreibvorgänge). Die **Entladegrenze** zieht mit (Nov–Feb 30 %, sonst 15 %), siehe *Entladegrenze im Winter*. Ladeslot 1 läuft vom Abendbeginn bis **07:15** mit **0,1 A** – Beginn und Ende liegen genau auf den Startzeiten bei cron-job.org (Minute 15, `SLOT_MINUTE`). TOU aus ab 07:15, Aus-Sicherungen bis 10 Uhr. **Ausnahme November–Februar:** Winterschlaf, siehe unten.
 
 - In der Prüfphase wird **nur eingeschaltet, nie ausgeschaltet**.
 - **Ladeslot nachführen:** Morgens prüft das Skript, ob Ladeslot 1 zur kommenden Nacht passt, und setzt ihn bei Bedarf neu – nur bei einem neuen Abendbeginn und bei der Zeitumstellung, also ca. 8× im Jahr. Die SOC-Schwelle wird nie geschrieben, sie gilt nur im Skript. Entladezeiten und die Slots 2 und 3 bleiben unverändert.
@@ -140,18 +140,16 @@ Im Winter steht der Akku morgens oft leer an der Entladegrenze – er kann dann 
   ```
   (Minuten 0, 30, 45, Stunden 8–15, Jan/Feb/Nov/Dez – die :15 macht der Hauptjob, so laufen nie zwei Jobs gleichzeitig). Reaktionszeit dann ≤ ca. 20 Min. (15 Min. Takt + bis 5 Min. Datenverzug des Loggers).
 
-## Entladegrenze im Winter (optional, derzeit aus)
+## Entladegrenze im Winter
 
-> **Derzeit aus:** Die Schwelle steht von November bis Februar auf 30 %, die Entladegrenze bleibt ganzjährig bei 15 %. Dank Winterschlaf ist das kein Problem: Der Akku schläft bei 30 % ein und bleibt bis zur ersten Sonne im Schlaf. Wer die Grenze trotzdem mitziehen will, trägt bei 11, 12, 1 und 2 zusätzlich `"odsoc": 30` ein.
+Im Winter reicht die Sonne selten, um die Akkus voll zu laden. Damit sie nicht wochenlang am unteren Rand hängen, setzt das Skript die **Entladegrenze** (Overdischarge-SOC, in der App unter *Battery settings*) von **November bis Februar auf 30 %** und am 1. März zurück auf **15 %** (`ODSOC_NORMAL`). Der Wechselrichter entlädt den Akku dann nicht unter 30 %, und das Skript legt ihn bei SOC ≤ 30 % schlafen.
 
-Im Winter reicht die Sonne selten, um die Akkus voll zu laden. Damit sie nicht wochenlang am unteren Rand hängen, kann das Skript die **Entladegrenze** (Overdischarge-SOC, in der App unter *Battery settings*) von **November bis Februar auf 30 %** setzen und am 1. März wieder auf deinen Normalwert. Der Wechselrichter entlädt den Akku dann nicht unter 30 %, und das Skript legt ihn bei SOC ≤ 30 % schlafen.
-
-- **Beim RAI-3K-48ES-5G nicht aus der Ferne schreibbar:** App, Web und API melden beim Overdischarge-SOC „Datenlogger offline“ (TOU und Force-Charge-SOC funktionieren). Deshalb steht `ODSOC_SCHREIBEN = False`: Das Skript **prüft nur** und schickt bei Abweichung morgens **eine Fehler-Mail pro Tag** als Erinnerung – also am 1. November und am 1. März. Dann den Wert am Gerät einstellen (Display oder SolisTech-View-App per Direktverbindung).
-- Geräte, die das Schreiben zulassen: `ODSOC_SCHREIBEN = True` → 2 Schreibvorgänge im Jahr (1. November und 1. März, jeweils morgens).
+- **Aus der Ferne schreibbar seit dem Firmware-Update** von Wechselrichter und Datenlogger (26.11.2026). Vorher meldeten App, Web und API beim Overdischarge-SOC „Datenlogger offline“. Mit `ODSOC_SCHREIBEN = False` würde das Skript nur prüfen und bei Abweichung täglich per Mail erinnern.
+- **Geprüft wird zusammen mit dem Ladeslot:** um **07:15** und **10:15** (Reserve), sonst nie. Weicht der Wert ab, schreibt das Skript den Planwert – auch nach einer Handänderung in der App (Hinweis im Protokoll, z. B. „Entladegrenze: 35 → 30 %, bestätigt“). **Dauerhaft ändern also im `MONATSPLAN`.**
+- **Schreibvorgänge:** 2 im Jahr (1. November, 1. März) plus Korrekturen.
 - **Kontrolle:** Nach dem Schreiben wird zweimal zurückgelesen (nach 15 und 30 s). Jeder Morgenlauf vergleicht den Wert mit dem Plan (nur lesen).
 - **Sperre:** Bleibt ein Schreibversuch unbestätigt (Cloud nimmt an, Wechselrichter übernimmt nicht – z. B. Datenlogger offline), gibt es **Fehler + E-Mail** und **höchstens einen Versuch pro Tag**; der nächste folgt am nächsten Morgen. Dasselbe gilt für den Ladeslot. Der manuelle Befehl `ladeslot` umgeht die Sperre.
-- **Derzeit ausgeschaltet** (`ODSOC_STEUERN = False`): Beim RAI-3K-48ES-5G steht die Entladegrenze fest auf 15 % und lässt sich nicht per API ändern – die Prüfung brachte nur zusätzliche Cloud-Abfragen und Timeout-Warnungen. Manuell lesen geht weiterhin mit `grenzen`.
-- **CID:** Beim RAI-3K-48ES-5G ist es **CID 158** (157 = Reserve-/Backup-SOC, 160 = Force-Charge-SOC). **Zum Einschalten** bzw. bei anderen Geräten:
+- **CID:** Beim RAI-3K-48ES-5G ist es **CID 158** (157 = Reserve-/Backup-SOC, 160 = Force-Charge-SOC). **Bei anderen Geräten** vorher prüfen:
   1. *Run workflow* → `grenzen` starten. Das liest drei Kandidaten (CID 157, 158, 160) nur aus.
   2. Die Werte mit der Solis-App vergleichen: Welche CID zeigt den Overdischarge-SOC? (Sicherheitshalber den Wert in der App kurz testweise ändern und `grenzen` erneut starten.)
   3. Im Skript `ODSOC_CID` eintragen, `ODSOC_NORMAL` prüfen (Normalwert, hier 15 %) und `ODSOC_STEUERN = True`.
@@ -162,14 +160,15 @@ Im Winter reicht die Sonne selten, um die Akkus voll zu laden. Damit sie nicht w
 
 ```python
 MONATSPLAN = {
-    1:  {"abend": 17, "soc": 30},   # Nov–Feb 30 %, sonst 15 %
+    1:  {"abend": 17, "soc": 30, "odsoc": 30},   # Nov–Feb 30/30, sonst 15/15
     # …
     3:  {"abend": 18, "abend_sz": 19, "soc": 15},   # abend_sz = solange Sommerzeit gilt
     # …
     12: {"abend": 16, "soc": 15},
 }
 LADESTROM = "0.1"         # Ladestrom von Slot 1 in A
-ODSOC_STEUERN = False     # Entladegrenze prüfen/steuern (aus: fest 15 %, nicht per API änderbar)
+ODSOC_STEUERN = True      # Entladegrenze prüfen/steuern (07:15 + 10:15)
+ODSOC_SCHREIBEN = True    # per API schreiben (seit Firmware-Update 26.11.2026 möglich)
 ODSOC_CID = 158           # CID des Overdischarge-SOC (RAI-3K-48ES-5G)
 ODSOC_NORMAL = 15         # Entladegrenze außerhalb des Winters
 PRUEF_ENDE = 6            # letzte Prüfung 06:00–06:59

@@ -76,12 +76,10 @@ import requests
 #              fehlt der Eintrag, gilt ODSOC_NORMAL. Wird nur geschrieben, wenn sie sich ändert.
 # Abendbeginn = Sonnenuntergang −1 Std., spätester Wert des Monats, auf volle Stunde aufgerundet.
 # cron-job.org startet stündlich rund um die Uhr – Änderungen am Abendbeginn brauchen dort nichts.
-# Nov–Feb: Schwelle 30 % (Akku schläft früher ein und hungert nicht bei 15 %). Die Entladegrenze
-# bleibt bei 15 % – sie lässt sich nur am Gerät ändern, und der Winterschlaf hält den Akku ohnehin
-# bis zur ersten Sonne im Schlaf. Optional zusätzlich "odsoc": 30 (dann am Gerät einstellen).
+# Nov–Feb: Schwelle UND Entladegrenze 30 % (Winterpuffer, Akku hungert nicht bei 15 %), sonst 15/15.
 MONATSPLAN = {
-    1:  {"abend": 17, "soc": 30},
-    2:  {"abend": 18, "soc": 30},
+    1:  {"abend": 17, "soc": 30, "odsoc": 30},
+    2:  {"abend": 18, "soc": 30, "odsoc": 30},
     3:  {"abend": 18, "abend_sz": 19, "soc": 15},
     4:  {"abend": 20, "soc": 15},
     5:  {"abend": 21, "soc": 15},
@@ -90,8 +88,8 @@ MONATSPLAN = {
     8:  {"abend": 21, "soc": 15},
     9:  {"abend": 20, "soc": 15},
     10: {"abend": 17, "abend_sz": 19, "soc": 15},
-    11: {"abend": 17, "soc": 30},
-    12: {"abend": 16, "soc": 30},
+    11: {"abend": 17, "soc": 30, "odsoc": 30},
+    12: {"abend": 16, "soc": 30, "odsoc": 30},
 }
 LADESTROM = "0.1"         # Ladestrom von Slot 1 in A (lässt die Pylontech-BMS schlafen)
 SLOT_MINUTE = 15          # Minute für Beginn und Ende von Ladeslot 1 = Startminute bei cron-job.org
@@ -111,13 +109,12 @@ NETZ_MAX_ALTER_MIN = 20   # ältere Netzwerte gelten als unbekannt (Logger lädt
 # CID den Wert aus der Solis-App zeigt, bevor ODSOC_STEUERN = True gesetzt wird.
 # Schwelle (soc) und Entladegrenze (odsoc) bewusst IDENTISCH halten: Der Akku entlädt bis zur
 # Grenze, schläft dort ein und bleibt nach dem Ausschalten morgens sparsam im Standby.
-# AUS: Die Entladegrenze steht fest auf 15 % und lässt sich beim RAI-3K-48ES-5G nicht per API ändern.
-# Ohne Prüfung entfallen die vielen atRead-Abfragen (CID 158) und deren Timeout-Warnungen.
-ODSOC_STEUERN = False
-# Beim RAI-3K-48ES-5G lässt sich der Overdischarge-SOC NICHT aus der Ferne ändern (App/Web/API
-# melden 'Datenlogger offline', TOU und Force-Charge-SOC gehen). Daher nur prüfen und erinnern:
-# Weicht der Wert vom Plan ab, gibt es morgens EINE Fehler-Mail pro Tag ('bitte am Gerät einstellen').
-ODSOC_SCHREIBEN = False   # True = per API schreiben (nur wenn dein Gerät das zulässt)
+# Seit dem Firmware-Update von Wechselrichter und Datenlogger (26.11.2026, Solis-Service) lässt sich
+# der Overdischarge-SOC auch aus der Ferne schreiben. Geprüft/geschrieben wird nur zusammen mit dem
+# Ladeslot (07:15 + Reserve 10:15, siehe ABGLEICH_STUNDEN). Eine Handänderung in der App wird dabei
+# auf den Plan zurückgesetzt (Hinweis im Protokoll).
+ODSOC_STEUERN = True
+ODSOC_SCHREIBEN = True    # False = nur prüfen und bei Abweichung täglich per Mail erinnern
 ODSOC_CID = 158           # bestätigt am 23.10.2026 (Abgleich mit der Solis-App)
 ODSOC_NORMAL = 15         # Overdischarge-SOC außerhalb des Winters (bewusst = SOC-Schwelle)
 GRENZEN_KANDIDATEN = {    # werden von "grenzen" nur gelesen (beim RAI-3K-48ES-5G bestätigt)
